@@ -192,6 +192,13 @@ final class Inbox {
         items.removeAll { $0.id == item.id }
     }
 
+    /// Rewrites a draft with the current About you, taking the user's edits and comment into account.
+    func redraft(_ item: Item, current: String, comment: String) async throws -> String {
+        try await Claude(aboutMe: settings.aboutMe)
+            .redraft(item.message, thread: item.thread ?? [ThreadMessage(author: item.message.from, date: item.message.date, text: item.message.preview, fromMe: false)],
+                     current: current, comment: comment)
+    }
+
     func setDraft(_ id: String, _ draft: String) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].draft = draft

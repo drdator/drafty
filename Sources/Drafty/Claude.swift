@@ -41,6 +41,21 @@ struct Claude: Sendable {
     private static let schema = #"{"type":"object","properties":{"needs_reply":{"type":"boolean"},"reason":{"type":"string"},"priority":{"type":"string","enum":["high","medium","low"]},"draft":{"type":"string"}},"required":["needs_reply","reason","priority","draft"],"additionalProperties":false}"#
 
     func triage(_ message: Message, thread: [ThreadMessage]) async throws -> Verdict {
+        try await ask(about: message, thread: thread)
+    }
+
+    /// A new draft, given the user's current one and an optional comment on what to change.
+    func redraft(_ message: Message, thread: [ThreadMessage], current: String, comment: String) async throws -> String {
+        var request = "The user is replying to this and wants a new draft. Their current draft:\n<draft>\n\(current)\n</draft>"
+        if !comment.isEmpty {
+            request += "\n\nTheir comment: \(comment)"
+        }
+        let draft = try await ask(about: message, thread: thread, request: request).draft
+        guard !draft.isEmpty else { throw AppError("Claude returned an empty draft") }
+        return draft
+    }
+
+    private func ask(about message: Message, thread: [ThreadMessage], request: String = "") async throws -> Verdict {
         let conversation = thread.map {
             "[\($0.date.formatted(date: .abbreviated, time: .shortened))] \($0.fromMe ? "The user" : $0.author):\n\($0.text)"
         }.joined(separator: "\n\n")
@@ -63,6 +78,8 @@ struct Claude: Sendable {
             <conversation>
             \(conversation)
             </conversation>
+
+            \(request)
             """)
 
         let output = try JSONDecoder().decode(Output.self, from: data)

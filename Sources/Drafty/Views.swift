@@ -87,6 +87,8 @@ struct ItemView: View {
     let item: Item
     @State private var draft: String
     @State private var sending = false
+    @State private var comment = ""
+    @State private var redrafting = false
     @State private var error: String?
     @Environment(\.palette) private var palette
 
@@ -132,23 +134,54 @@ struct ItemView: View {
                 .padding(4)
                 .frame(minHeight: 70, maxHeight: 160)
                 .raised(palette)
+                .disabled(redrafting)
                 .onChange(of: draft) { inbox.setDraft(item.id, draft) }
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
-            HStack {
+            HStack(spacing: 8) {
                 Button("Dismiss") { inbox.dismiss(item) }
                     .themedButton(palette)
-                Spacer()
+                HStack(spacing: 4) {
+                    TextField("Redraft with a comment…", text: $comment)
+                        .textFieldStyle(.plain)
+                        .onSubmit(redraft)
+                    if redrafting {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Button(action: redraft) { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.borderless)
+                            .help("Redraft")
+                    }
+                }
+                .font(.system(size: 12))
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .raised(palette)
+                .disabled(redrafting || sending)
                 Button(sending ? "Sending…" : "Send") { send() }
                     .themedButton(palette, prominent: true)
-                    .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(sending || redrafting || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(palette == nil ? 12 : 16)
         .background {
             if palette == nil { RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)) }
+        }
+    }
+
+    private func redraft() {
+        redrafting = true
+        error = nil
+        Task {
+            do {
+                draft = try await inbox.redraft(item, current: draft, comment: comment)
+                comment = ""
+            } catch {
+                self.error = error.localizedDescription
+            }
+            redrafting = false
         }
     }
 
