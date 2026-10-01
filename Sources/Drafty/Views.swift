@@ -251,6 +251,59 @@ struct MessageHeader: View {
     }
 }
 
+/// One message in a dry run: what auto-reply would send, or why it would leave it to you.
+/// The slider and sources are applied live, so the results follow the settings.
+struct DryRunRow: View {
+    let result: DryRunResult
+    let settings: Settings
+
+    private var verdict: (sends: Bool, text: String) {
+        let source = result.item.message.source
+        guard settings.autoReplySources.includes(source) else {
+            return (false, "Stays with you: \(source == .slack ? "Slack" : "email") isn't included")
+        }
+        switch result.outcome {
+        case let .eligible(level, confidence) where settings.autoReplyLevel != .off && level <= settings.autoReplyLevel:
+            return (true, "Would send · \(level.kind) · \(Int((confidence * 100).rounded()))% sure")
+        case let .eligible(level, confidence):
+            return (false, "Would send at \(level.label) or higher · \(Int((confidence * 100).rounded()))% sure")
+        case let .kept(reason):
+            return (false, "Stays with you: \(reason)")
+        }
+    }
+
+    var body: some View {
+        let verdict = verdict
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: verdict.sends ? "paperplane.fill" : "hand.raised")
+                .foregroundStyle(verdict.sends ? Color.accentColor : Color.secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(nsImage: result.item.message.source == .slack ? Logo.slack : Logo.gmail)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 12, height: 12)
+                    Text(result.item.message.from).fontWeight(.semibold).lineLimit(1)
+                    Text(result.item.message.title).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .font(.system(size: 12))
+                if verdict.sends {
+                    Text(result.item.draft)
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
+                }
+                Text(verdict.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 /// Replies Drafty sent on its own, newest first.
 struct AutoReplyLog: View {
     let inbox: Inbox
@@ -533,6 +586,17 @@ struct SettingsView: View {
                     Text(Self.autoReplyRules)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    HStack(alignment: .top) {
+                        Button(inbox.dryRunning ? "Checking…" : "Dry run") { Task { await inbox.runDryRun() } }
+                            .themedButton(palette)
+                            .disabled(inbox.dryRunning || inbox.items.isEmpty || inbox.settings.jevKey.isEmpty)
+                        Text("See what it would send for the messages in your list right now, without sending anything.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let results = inbox.dryRun {
+                        ForEach(results) { DryRunRow(result: $0, settings: inbox.settings) }
+                    }
                 }
                 HStack {
                     Toggle("Open at login", isOn: $openAtLogin)

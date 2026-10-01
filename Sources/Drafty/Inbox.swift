@@ -66,6 +66,8 @@ struct Item: Codable, Identifiable {
     let reason: String
     let priority: Priority?  // nil for items saved before priorities existed
     var thread: [ThreadMessage]?  // the conversation the draft was based on; filled in on the next check if missing
+    var why: String?  // as on Candidate; filled in on the next check if missing
+    var canAutoReply: Bool?
     var draft: String
     var id: String { message.id }
 }
@@ -99,6 +101,19 @@ enum AutoReplySources: String, Codable, CaseIterable {
         case .both: true
         }
     }
+}
+
+/// What auto-reply would do with an item, from the hard rules and Jev. The slider and sources are applied on top,
+/// so a dry run stays current while the user adjusts them.
+enum AutoReplyOutcome {
+    case eligible(AutoReplyLevel, confidence: Double)  // Jev is sure enough, the sender isn't an agent, no rule blocks it
+    case kept(String)  // stays with the user, and why
+}
+
+struct DryRunResult: Identifiable {
+    let item: Item
+    let outcome: AutoReplyOutcome
+    var id: String { item.id }
 }
 
 /// A reply Drafty sent on its own, kept so the user can see what went out.
@@ -152,6 +167,8 @@ final class Inbox {
     }
     /// Items that will be sent automatically at the given time unless cancelled.
     var autoSendAt: [String: Date] = [:]
+    var dryRun: [DryRunResult]?
+    var dryRunning = false
     var status = ""
     var checking = false
 
@@ -225,6 +242,12 @@ final class Inbox {
             }
         }
 
+        for candidate in found {
+            guard let index = items.firstIndex(where: { $0.id == candidate.message.id }), items[index].canAutoReply == nil else { continue }
+            items[index].why = candidate.why
+            items[index].canAutoReply = candidate.canAutoReply
+        }
+
         let known = Set(items.map(\.id))
         let fresh = found
             .filter { handled[$0.message.id] == nil && !known.contains($0.message.id) }
@@ -240,10 +263,11 @@ final class Inbox {
                 let thread = try await candidate.thread()
                 let verdict = try await claude.triage(message, thread: thread, why: candidate.why)
                 if verdict.needsReply {
-                    let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, thread: thread, draft: verdict.draft)
+                    let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, thread: thread,
+                                    why: candidate.why, canAutoReply: candidate.canAutoReply, draft: verdict.draft)
                     added.append(item)
                     items.append(item)
-                    await considerAutoReply(item, why: candidate.why, allowed: candidate.canAutoReply)
+                    await considerAutoReply(item)
                 } else {
                     handled[message.id] = .now
                 }
@@ -307,26 +331,50 @@ final class Inbox {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["auto:\(id)"])
     }
 
-    /// The hard rules come first, in code, so no message can talk its way past them. Then Jev judges the draft.
-    private func considerAutoReply(_ item: Item, why: String, allowed: Bool) async {
-        let settings = settings
-        let anHourAgo = Date.now.addingTimeInterval(-3600)
-        guard settings.autoReplyLevel != .off, !settings.jevKey.isEmpty, allowed,
-              settings.autoReplySources.includes(item.message.source),
-              item.priority != .high,
-              !item.draft.isEmpty,
-              item.draft.firstMatch(of: #/\[[^\]]+\]/#) == nil,  // an unfilled [placeholder]
-              !autoReplies.contains(where: { $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo })
+    private func considerAutoReply(_ item: Item) async {
+        guard settings.autoReplyLevel != .off, settings.autoReplySources.includes(item.message.source),
+              case let .eligible(level, confidence) = await autoReplyOutcome(item), level <= settings.autoReplyLevel
         else { return }
+        scheduleAutoReply(item, level: level, confidence: confidence)
+    }
 
+    /// Checks every item in the list as auto-reply would, without sending anything.
+    func runDryRun() async {
+        dryRunning = true
+        defer { dryRunning = false }
+        var results: [DryRunResult] = []
+        for item in items.sorted(by: { $0.message.date > $1.message.date }) {
+            results.append(DryRunResult(item: item, outcome: await autoReplyOutcome(item)))
+        }
+        dryRun = results
+    }
+
+    /// The hard rules come first, in code, so no message can talk its way past them. Then Jev judges the draft.
+    private func autoReplyOutcome(_ item: Item) async -> AutoReplyOutcome {
+        let anHourAgo = Date.now.addingTimeInterval(-3600)
+        guard !settings.jevKey.isEmpty else { return .kept("No Jev key") }
+        guard let allowed = item.canAutoReply else { return .kept("Not known until the next check") }
+        guard allowed else {
+            return .kept(item.message.source == .slack ? "Not a DM with a colleague" : "Not an email to you from your own domain")
+        }
+        if item.priority == .high { return .kept("High priority") }
+        if item.draft.isEmpty { return .kept("No draft") }
+        if item.draft.firstMatch(of: #/\[[^\]]+\]/#) != nil { return .kept("The draft has a [placeholder]") }
+        if autoReplies.contains(where: { $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo }) {
+            return .kept("Already auto-replied in this conversation within the hour")
+        }
+
+        let percent = { (value: Double) in "\(Int((value * 100).rounded()))%" }
         do {
-            let decision = try await Jev(key: settings.jevKey).judge(item.message, thread: item.thread ?? [], why: why, draft: item.draft)
-            guard let level = decision.level, level <= settings.autoReplyLevel,
-                  decision.confidence >= Self.autoReplyConfidence, decision.fromAgent < 0.5
-            else { return }
-            scheduleAutoReply(item, level: level, confidence: decision.confidence)
+            let decision = try await Jev(key: settings.jevKey).judge(item.message, thread: item.thread ?? [], why: item.why ?? "", draft: item.draft)
+            if decision.fromAgent >= 0.5 { return .kept("From a bot or agent (\(percent(decision.fromAgent)))") }
+            guard let level = decision.level else { return .kept("Needs you (Jev is \(percent(decision.confidence)) sure)") }
+            guard decision.confidence >= Self.autoReplyConfidence else {
+                return .kept("Jev is only \(percent(decision.confidence)) sure it's a \(level.kind.lowercased())")
+            }
+            return .eligible(level, confidence: decision.confidence)
         } catch {
-            status = "Jev: \(error.localizedDescription)"
+            return .kept("Jev failed: \(error.localizedDescription)")
         }
     }
 
