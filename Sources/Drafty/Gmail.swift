@@ -83,7 +83,7 @@ actor Gmail {
         return thread.messages.filter { !$0.labels.contains("DRAFT") }.suffix(8).map { message in
             let who = message.labels.contains("SENT") ? "The user" : message.header("From") ?? "Unknown"
             let body = (message.payload.text("text/plain") ?? message.payload.text("text/html")?.strippingHTML ?? message.snippet)
-                .split(separator: "\n", omittingEmptySubsequences: false)
+                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)  // also splits "\r\n", which is one Character
                 .filter { !$0.hasPrefix(">") }  // drop quoted history, earlier messages are in the transcript anyway
                 .joined(separator: "\n")
             return "From: \(who)\nDate: \(message.header("Date") ?? "")\n\n\(body.prefix(4000))"
