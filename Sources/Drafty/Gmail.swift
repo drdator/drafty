@@ -84,16 +84,32 @@ actor Gmail {
     private func conversation(_ threadID: String) async throws -> [ThreadMessage] {
         let thread: MailThread = try await get("threads/\(threadID)", [.init(name: "format", value: "full")])
         return thread.messages.filter { !$0.labels.contains("DRAFT") }.suffix(8).map { message in
-            let body = (message.payload.text("text/plain") ?? message.payload.text("text/html")?.strippingHTML ?? message.snippet)
-                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)  // also splits "\r\n", which is one Character
-                .filter { !$0.hasPrefix(">") }  // drop quoted history, earlier messages are in the thread anyway
-                .joined(separator: "\n")
-            return ThreadMessage(
+            ThreadMessage(
                 author: Self.displayName(message.header("From") ?? "Unknown"),
                 date: Date(timeIntervalSince1970: (Double(message.internalDate) ?? 0) / 1000),
-                text: String(body.prefix(4000)).trimmingCharacters(in: .whitespacesAndNewlines),
+                text: String(Self.body(of: message).prefix(4000)),
                 fromMe: message.labels.contains("SENT"))
         }
+    }
+
+    /// Your recently sent emails, newest first.
+    func sentMessages(limit: Int = 40) async throws -> [String] {
+        let list: MessageList = try await get("messages", [.init(name: "q", value: "in:sent newer_than:180d"), .init(name: "maxResults", value: "\(limit)")])
+        var texts: [String] = []
+        for ref in list.messages ?? [] {
+            let message: Msg = try await get("messages/\(ref.id)", [.init(name: "format", value: "full")])
+            texts.append("[Email to \(message.header("To") ?? "?")] \(message.header("Subject") ?? "")\n\(Self.body(of: message).prefix(2000))")
+        }
+        return texts
+    }
+
+    /// A message's text without the quoted history (earlier messages are in the thread anyway).
+    private static func body(of message: Msg) -> String {
+        (message.payload.text("text/plain") ?? message.payload.text("text/html")?.strippingHTML ?? message.snippet)
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)  // also splits "\r\n", which is one Character
+            .filter { !$0.hasPrefix(">") }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func myEmail() async throws -> String {
@@ -235,6 +251,10 @@ actor Gmail {
     private struct ThreadList: Decodable {
         let threads: [Ref]?
         struct Ref: Decodable { let id: String }
+    }
+
+    private struct MessageList: Decodable {
+        let messages: [ThreadList.Ref]?
     }
 
     private struct MailThread: Decodable {

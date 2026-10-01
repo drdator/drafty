@@ -293,6 +293,7 @@ struct SettingsView: View {
     @Bindable var inbox: Inbox
     let done: () -> Void
     @State private var connecting: Task<Void, Never>?
+    @State private var writingAboutMe = false
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage("theme") private var theme = Theme.system
     @Environment(\.palette) private var palette
@@ -332,11 +333,25 @@ struct SettingsView: View {
                     TextEditor(text: $inbox.settings.aboutMe)
                         .scrollContentBackground(.hidden)
                         .padding(4)
-                        .frame(height: 64)
+                        .frame(height: 140)
                         .raised(palette)
-                    Text("Who you are and how you like to write. Used when drafting replies.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .disabled(writingAboutMe)
+                    HStack(alignment: .top) {
+                        Text("Who you are and how you like to write. Used when drafting replies.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(writingAboutMe ? "Reading your messages…" : "Write from my messages") {
+                            writingAboutMe = true
+                            Task {
+                                await inbox.writeAboutMe()
+                                writingAboutMe = false
+                            }
+                        }
+                        .themedButton(palette)
+                        .disabled(writingAboutMe || !inbox.isConfigured)
+                        .help("Claude describes how you write from your recent Slack messages and sent email. Replaces the text above.")
+                    }
                 }
                 section("Claude") {
                     Text(Claude.executable == nil

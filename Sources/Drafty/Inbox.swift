@@ -200,6 +200,22 @@ final class Inbox {
                      current: current, comment: comment)
     }
 
+    /// Has Claude rewrite About you from the user's own recent Slack messages and sent email.
+    func writeAboutMe() async {
+        status = "Reading your messages…"
+        do {
+            var samples: [String] = []
+            if let slack { samples += try await slack.myMessages() }
+            if let gmail { samples += try await gmail.sentMessages() }
+            guard !samples.isEmpty else { throw AppError("Found no messages you've written") }
+            status = "Describing your style from \(samples.count) messages…"
+            settings.aboutMe = try await Claude(aboutMe: settings.aboutMe).describeStyle(samples: samples)
+            status = "About you updated from \(samples.count) of your messages"
+        } catch {
+            status = "About you: \(error.localizedDescription)"
+        }
+    }
+
     func setDraft(_ id: String, _ draft: String) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].draft = draft

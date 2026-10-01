@@ -133,6 +133,21 @@ actor Slack {
         return thread
     }
 
+    /// Your own recent messages, newest first, each labelled with where you wrote it.
+    func myMessages(limit: Int = 500) async throws -> [String] {
+        var texts: [String] = []
+        for page in 1...5 where texts.count < limit {
+            let matches = try await call("search.messages", ["query": "from:me", "sort": "timestamp", "count": "100", "page": "\(page)"],
+                                         as: Search.self).messages.matches
+            for match in matches {
+                let place = match.isDM ? (match.channel.is_mpim == true ? "group DM" : "DM") : "#\(match.channel.name ?? "channel")"
+                texts.append("[Slack \(place)] \(await readable(match.text))")
+            }
+            if matches.isEmpty { break }  // pages can come back a little short, so only stop on an empty one
+        }
+        return texts
+    }
+
     private func search(_ query: String) async throws -> [Match] {
         try await call("search.messages", ["query": query, "sort": "timestamp", "count": "100"], as: Search.self).messages.matches
     }

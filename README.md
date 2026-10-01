@@ -44,6 +44,8 @@ The app requests the `gmail.modify` scope so it can read mail, send replies, and
 - **Gmail:** It looks at inbox threads from the last 2 days, skipping Promotions, Social, Updates and Forums, and keeps the ones where the last message isn't yours.
 - **Claude:** Each new message goes to Opus 5.5 once, with the surrounding thread, through `claude -p`. Claude decides whether it needs a reply and drafts one in the same call. Claude Code runs with no tools, settings, hooks or MCP servers (`--tools "" --restricted --strict-mcp-config`), since the input is mail from strangers. Write who you are and how you like to sound in **About you**.
 
+In Settings, **Write from my messages** has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.
+
 An item drops off the list when you reply anywhere (in the app, Slack or Gmail), when a newer message replaces it, or when you dismiss it. Nothing is sent without you clicking **Send**.
 
 The queries and the lookback window are constants at the top of `Slack.swift` and `Gmail.swift`. Settings and tokens are stored in plain text in `~/Library/Application Support/Drafty/state.json`, readable only by your user (0600).
