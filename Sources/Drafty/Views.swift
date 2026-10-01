@@ -363,7 +363,7 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button(writingAboutMe ? "Reading your messages…" : "Write from my messages") {
+                        Button(writingAboutMe ? "Reading your messages…" : "Auto-generate") {
                             writingAboutMe = true
                             Task {
                                 await inbox.writeAboutMe()

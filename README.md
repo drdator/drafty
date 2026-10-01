@@ -44,7 +44,7 @@ The app requests the `gmail.modify` scope so it can read mail, send replies, and
 - **Gmail:** It looks at inbox threads from the last 2 days, skipping Promotions, Social, Updates and Forums, and keeps the ones where the last message isn't yours.
 - **Claude:** Each new message goes to Opus 5.5 once, with the surrounding thread, through `claude -p`. Claude decides whether it needs a reply and drafts one in the same call. Claude Code runs with no tools, settings, hooks or MCP servers (`--tools "" --restricted --strict-mcp-config`), since the input is mail from strangers. Write who you are and how you like to sound in **About you**.
 
-In Settings, **Write from my messages** has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.
+In Settings, **Auto-generate** (under About you) has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.
 
 **Redraft with tools** (Settings, off by default) adds a wrench next to ↻ that lets Claude look things up while redrafting: **Read files** gives read-only access to your home folder (no shell, writing or network), **Full access** runs Claude Code with `--dangerously-skip-permissions`. Both read messages other people wrote, so a crafted message could steer them; Settings explains the risk before either is turned on. Automatic checks never use tools.
 
