@@ -35,7 +35,7 @@ actor Gmail {
         var result: [Candidate] = []
         for ref in list.threads ?? [] {
             let thread: MailThread = try await get("threads/\(ref.id)", [.init(name: "format", value: "metadata")]
-                + ["From", "Reply-To", "Subject", "Message-ID", "References"].map { .init(name: "metadataHeaders", value: $0) })
+                + ["From", "To", "Reply-To", "Subject", "Message-ID", "References"].map { .init(name: "metadataHeaders", value: $0) })
             guard let last = thread.messages.last(where: { !$0.labels.contains("DRAFT") }),
                   !last.labels.contains("SENT") else { continue }
 
@@ -60,7 +60,10 @@ actor Gmail {
                 target: .gmail(replyTo)
             )
             let threadID = thread.id
-            result.append(Candidate(message: message) { [self] in try await conversation(threadID) })
+            let why = (last.header("To") ?? "").localizedCaseInsensitiveContains(email)
+                ? "The email is addressed to the user."
+                : "The user is only cc'd or got it through a list, not addressed in To."
+            result.append(Candidate(message: message, why: why) { [self] in try await conversation(threadID) })
         }
         return result
     }

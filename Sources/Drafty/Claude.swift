@@ -28,6 +28,12 @@ struct Claude: Sendable {
         newsletter, automated notification, receipt or calendar noise, if it only says thanks or ok, if the \
         conversation is already resolved, or if someone else is clearly expected to answer.
 
+        Be strict in group conversations. In a channel, group DM, thread or email with several people, it only \
+        needs a reply if the latest message is addressed to the user, asks something only they can answer, or \
+        responds to something they said. Discussion between others, replies to someone else, status updates and \
+        acknowledgements don't. An answer to the user's own question only needs a reply if it asks something back. \
+        Email where the user is only cc'd rarely needs one.
+
         If it needs a reply, write the draft in the user's voice: same language and tone as the conversation, \
         short and direct, plain text, no subject line or signature. Don't invent facts, dates or commitments; \
         where only the user knows something, leave a short [placeholder].
@@ -40,8 +46,8 @@ struct Claude: Sendable {
 
     private static let schema = #"{"type":"object","properties":{"needs_reply":{"type":"boolean"},"reason":{"type":"string"},"priority":{"type":"string","enum":["high","medium","low"]},"draft":{"type":"string"}},"required":["needs_reply","reason","priority","draft"],"additionalProperties":false}"#
 
-    func triage(_ message: Message, thread: [ThreadMessage]) async throws -> Verdict {
-        try await ask(about: message, thread: thread)
+    func triage(_ message: Message, thread: [ThreadMessage], why: String) async throws -> Verdict {
+        try await ask(about: message, thread: thread, why: why)
     }
 
     /// A new draft, given the user's current one and an optional comment on what to change.
@@ -55,7 +61,7 @@ struct Claude: Sendable {
         return draft
     }
 
-    private func ask(about message: Message, thread: [ThreadMessage], request: String = "") async throws -> Verdict {
+    private func ask(about message: Message, thread: [ThreadMessage], why: String = "", request: String = "") async throws -> Verdict {
         let conversation = thread.map {
             "[\($0.date.formatted(date: .abbreviated, time: .shortened))] \($0.fromMe ? "The user" : $0.author):\n\($0.text)"
         }.joined(separator: "\n\n")
@@ -74,6 +80,7 @@ struct Claude: Sendable {
         ], input: """
             \(message.source == .slack ? "Slack" : "Email"): \(message.title)
             Latest message from: \(message.from)
+            \(why)
 
             <conversation>
             \(conversation)

@@ -18,21 +18,34 @@ actor Slack {
         async let dms = search("to:me after:\(after)")
         async let mentions = search("<@\(me)> after:\(after)")
         async let mine = search("from:me after:\(after)")
+        let myMessages = try await mine
+        let handle = "@\(await name(me))"
 
         // A conversation is answered if your latest message in it is newer than theirs.
         var answered: [String: String] = [:]
-        for message in try await mine {
+        for message in myMessages {
             answered[message.key] = max(answered[message.key] ?? "", message.ts)
         }
-        var latest: [String: Match] = [:]
-        for message in try await dms + mentions
-        where message.user != nil && message.user != me && message.user != "USLACKBOT" && message.ts > latest[message.key]?.ts ?? "" {
-            latest[message.key] = message
+
+        // Each with a note for Claude on why it surfaced, which matters for whether it needs a reply.
+        var incoming: [(match: Match, why: String)] = []
+        for message in try await dms {
+            incoming.append((message, message.channel.is_mpim == true ? "It's in a group DM with the user." : "It's a direct message to the user."))
+        }
+        for message in try await mentions {
+            incoming.append((message, "It @mentions the user (they're \(handle))."))
+        }
+
+        var latest: [String: (match: Match, why: String)] = [:]
+        for entry in incoming
+        where entry.match.user != nil && entry.match.user != me && entry.match.user != "USLACKBOT"
+            && entry.match.ts > latest[entry.match.key]?.match.ts ?? "" {
+            latest[entry.match.key] = entry
         }
 
         var result: [Candidate] = []
-        for message in latest.values where message.ts > answered[message.key] ?? "" {
-            result.append(await candidate(message))
+        for (match, why) in latest.values where match.ts > answered[match.key] ?? "" {
+            result.append(await candidate(match, why: why))
         }
         return result
     }
@@ -46,7 +59,7 @@ actor Slack {
         _ = try unwrap(await http(request), as: Envelope.self)
     }
 
-    private func candidate(_ match: Match) async -> Candidate {
+    private func candidate(_ match: Match, why: String) async -> Candidate {
         let (channel, threadTs, ts, isDM) = (match.channel.id, match.threadTs, match.ts, match.isDM)
         let message = Message(
             id: "slack:\(match.key):\(ts)",
@@ -59,7 +72,7 @@ actor Slack {
             // Reply in the thread if there is one; channel mentions get a new thread, DMs a plain message.
             target: .slack(channel: channel, threadTs: threadTs ?? (isDM ? nil : ts))
         )
-        return Candidate(message: message) { [self] in
+        return Candidate(message: message, why: why) { [self] in
             try await conversation(channel: channel, threadTs: threadTs, latest: ts)
         }
     }

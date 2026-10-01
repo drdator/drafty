@@ -34,6 +34,7 @@ struct ThreadMessage: Codable, Sendable {
 /// A message found by a source. The thread is only fetched for messages we haven't triaged yet.
 struct Candidate: Sendable {
     let message: Message
+    let why: String  // how it reached the user (DM, mention, thread they're in, To or Cc), for Claude
     let thread: @Sendable () async throws -> [ThreadMessage]
 }
 
@@ -158,7 +159,7 @@ final class Inbox {
             status = "Reading \(index + 1) of \(fresh.count)…"
             do {
                 let thread = try await candidate.thread()
-                let verdict = try await claude.triage(message, thread: thread)
+                let verdict = try await claude.triage(message, thread: thread, why: candidate.why)
                 if verdict.needsReply {
                     let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, thread: thread, draft: verdict.draft)
                     added.append(item)
