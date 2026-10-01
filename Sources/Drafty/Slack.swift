@@ -153,16 +153,27 @@ actor Slack {
         return name
     }
 
-    /// Turns Slack markup into plain text: <@U123> mentions into names, <#C123|general> into #general,
-    /// <https://…|label> links into their label, and unescapes Slack's entities.
+    private func channelName(_ id: String) async -> String {
+        if let cached = names[id] { return cached }
+        guard let info = try? await call("conversations.info", ["channel": id], as: ChannelInfo.self) else { return id }
+        names[id] = info.channel.name
+        return info.channel.name
+    }
+
+    /// Turns Slack markup into plain text: <@U123> mentions into names, <#C123|general> (or a bare <#C123>)
+    /// into #general, <https://…|label> links into their label, and unescapes Slack's entities.
     private func readable(_ text: String) async -> String {
         var result = text
         for mention in text.matches(of: #/<@([A-Z0-9]+)(?:\|[^>]*)?>/#) {
             let who = await name(String(mention.1))
             result = result.replacingOccurrences(of: String(mention.0), with: "@\(who)")
         }
+        for reference in text.matches(of: #/<#([A-Z0-9]+)(?:\|([^>]*))?>/#) {
+            let label = reference.2.map(String.init) ?? ""
+            let channel = label.isEmpty ? await channelName(String(reference.1)) : label
+            result = result.replacingOccurrences(of: String(reference.0), with: "#\(channel)")
+        }
         return result
-            .replacing(#/<#[A-Z0-9]+\|([^>]+)>/#) { "#\($0.1)" }
             .replacing(#/<(https?:[^|>]+)\|([^>]+)>/#) { String($0.2) }
             .replacing(#/<(https?:[^>]+)>/#) { String($0.1) }
             .decodingEntities
@@ -234,6 +245,11 @@ actor Slack {
             let display_name: String?
             let real_name: String?
         }
+    }
+
+    private struct ChannelInfo: Decodable {
+        let channel: Channel
+        struct Channel: Decodable { let name: String }
     }
 
     private struct AuthTest: Decodable {
