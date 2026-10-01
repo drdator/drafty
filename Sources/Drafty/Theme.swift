@@ -35,7 +35,7 @@ struct Palette {
     let control: Color
     let controlPressed: Color
     let text: Color
-    let toggleTrack: Color
+    let recessed: Color  // segmented control track, thread box
     let toggleSelected: Color
     let strong: Color  // high-contrast primary button
     let strongPressed: Color
@@ -55,7 +55,7 @@ struct Palette {
         control: Color(white: 0.976),  // #f9f9f9
         controlPressed: Color(white: 0.988),  // #fcfcfc
         text: .black.opacity(0.8),
-        toggleTrack: .black.opacity(0.05),
+        recessed: .black.opacity(0.05),
         toggleSelected: Color(white: 0.976),
         strong: Color(white: 0.118),  // #1e1e1e
         strongPressed: Color(white: 0.2),  // #333
@@ -76,7 +76,7 @@ struct Palette {
         control: Color(white: 0.216),  // #373737
         controlPressed: Color(white: 0.235),  // #3c3c3c
         text: .white.opacity(0.9),
-        toggleTrack: .white.opacity(0.05),
+        recessed: .white.opacity(0.05),
         toggleSelected: .white.opacity(0.05),
         strong: Color(white: 0.949),  // #f2f2f2
         strongPressed: Color(white: 0.831),  // #d4d4d4
@@ -200,7 +200,7 @@ struct ThemePicker: View {
             }
         }
         .frame(height: 24)
-        .background(palette?.toggleTrack ?? Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: Palette.radius + 1))
+        .background(palette?.recessed ?? Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: Palette.radius + 1))
     }
 
     @ViewBuilder

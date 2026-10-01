@@ -89,6 +89,7 @@ struct ItemView: View {
     @State private var sending = false
     @State private var comment = ""
     @State private var redrafting = false
+    @State private var showThread = false
     @State private var error: String?
     @Environment(\.palette) private var palette
 
@@ -117,15 +118,27 @@ struct ItemView: View {
                 Text(item.message.date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if item.thread != nil {
+                    Button { showThread.toggle() } label: {
+                        Image(systemName: showThread ? "text.bubble.fill" : "text.bubble")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.tint)
+                    .help(showThread ? "Hide thread" : "Show thread")
+                }
                 if let link = item.message.link {
                     Link(destination: link) { Image(systemName: "arrow.up.forward.square") }
                         .help("Open in \(item.message.source == .slack ? "Slack" : "Gmail")")
                 }
             }
-            Text(item.message.preview)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
+            if showThread, let thread = item.thread {
+                ThreadView(thread: thread)
+            } else {
+                Text(item.message.preview)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
             Text(item.reason).font(.callout).italic()
 
             TextEditor(text: $draft)
@@ -196,6 +209,83 @@ struct ItemView: View {
                 sending = false
             }
         }
+    }
+}
+
+/// The conversation as chat bubbles: others on the left with an initial, yours on the right.
+struct ThreadView: View {
+    let thread: [ThreadMessage]
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(thread.enumerated()), id: \.offset) { _, message in
+                    bubble(message)
+                }
+            }
+            .padding(10)
+        }
+        .defaultScrollAnchor(.bottom)
+        .frame(maxHeight: 280)
+        .background(palette?.recessed ?? Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: Palette.radius))
+    }
+
+    private func bubble(_ message: ThreadMessage) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if message.fromMe {
+                Spacer(minLength: 48)
+            } else {
+                Avatar(name: message.author)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(message.fromMe ? "You" : message.author).fontWeight(.semibold)
+                    Text(Self.time(message.date)).foregroundStyle(.secondary)
+                }
+                .font(.system(size: 11))
+                Text(message.text)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background { background(fromMe: message.fromMe) }
+            if !message.fromMe {
+                Spacer(minLength: 24)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func background(fromMe: Bool) -> some View {
+        if let palette {
+            ControlSurface(palette: palette, fill: fromMe ? Color.accentColor.opacity(palette.scheme == .dark ? 0.3 : 0.14) : nil)
+        } else {
+            RoundedRectangle(cornerRadius: Palette.radius)
+                .fill(fromMe ? AnyShapeStyle(Color.accentColor.opacity(0.2)) : AnyShapeStyle(.background.opacity(0.7)))
+        }
+    }
+
+    private static func time(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+    }
+}
+
+/// The sender's initial on a color that stays the same for the same name.
+struct Avatar: View {
+    let name: String
+    private static let colors: [Color] = [.red, .orange, .green, .teal, .blue, .indigo, .purple, .pink]
+
+    var body: some View {
+        let seed = name.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        Circle()
+            .fill(Self.colors[seed % Self.colors.count].gradient)
+            .frame(width: 22, height: 22)
+            .overlay(Text(name.prefix(1).uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white))
     }
 }
 
