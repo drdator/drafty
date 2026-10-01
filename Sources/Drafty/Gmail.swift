@@ -60,7 +60,7 @@ actor Gmail {
                 target: .gmail(replyTo)
             )
             let threadID = thread.id
-            result.append(Candidate(message: message) { [self] in try await transcript(threadID) })
+            result.append(Candidate(message: message) { [self] in try await conversation(threadID) })
         }
         return result
     }
@@ -78,16 +78,19 @@ actor Gmail {
         try await post("threads/\(reply.threadId)/modify", Modify(removeLabelIds: ["UNREAD"]))
     }
 
-    private func transcript(_ threadID: String) async throws -> String {
+    private func conversation(_ threadID: String) async throws -> [ThreadMessage] {
         let thread: MailThread = try await get("threads/\(threadID)", [.init(name: "format", value: "full")])
         return thread.messages.filter { !$0.labels.contains("DRAFT") }.suffix(8).map { message in
-            let who = message.labels.contains("SENT") ? "The user" : message.header("From") ?? "Unknown"
             let body = (message.payload.text("text/plain") ?? message.payload.text("text/html")?.strippingHTML ?? message.snippet)
                 .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)  // also splits "\r\n", which is one Character
-                .filter { !$0.hasPrefix(">") }  // drop quoted history, earlier messages are in the transcript anyway
+                .filter { !$0.hasPrefix(">") }  // drop quoted history, earlier messages are in the thread anyway
                 .joined(separator: "\n")
-            return "From: \(who)\nDate: \(message.header("Date") ?? "")\n\n\(body.prefix(4000))"
-        }.joined(separator: "\n\n---\n\n")
+            return ThreadMessage(
+                author: Self.displayName(message.header("From") ?? "Unknown"),
+                date: Date(timeIntervalSince1970: (Double(message.internalDate) ?? 0) / 1000),
+                text: String(body.prefix(4000)).trimmingCharacters(in: .whitespacesAndNewlines),
+                fromMe: message.labels.contains("SENT"))
+        }
     }
 
     private func myEmail() async throws -> String {

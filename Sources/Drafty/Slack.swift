@@ -60,33 +60,36 @@ actor Slack {
             target: .slack(channel: channel, threadTs: threadTs ?? (isDM ? nil : ts))
         )
         return Candidate(message: message) { [self] in
-            try await transcript(channel: channel, threadTs: threadTs, latest: ts)
+            try await conversation(channel: channel, threadTs: threadTs, latest: ts)
         }
     }
 
-    private func transcript(channel: String, threadTs: String?, latest: String) async throws -> String {
+    private func conversation(channel: String, threadTs: String?, latest: String) async throws -> [ThreadMessage] {
         let me = try await myID()
         var messages: [Msg]
         if let threadTs {
-            let thread = try await call("conversations.replies", ["channel": channel, "ts": threadTs, "limit": "100"], as: History.self).messages
-            messages = Array(thread.prefix(1) + thread.dropFirst().suffix(29))
+            let replies = try await call("conversations.replies", ["channel": channel, "ts": threadTs, "limit": "100"], as: History.self).messages
+            messages = Array(replies.prefix(1) + replies.dropFirst().suffix(29))
         } else {
             let history = try await call("conversations.history", ["channel": channel, "latest": latest, "inclusive": "true", "limit": "15"], as: History.self)
             messages = history.messages.reversed()
         }
 
-        var lines: [String] = []
+        var thread: [ThreadMessage] = []
         for message in messages {
-            let who: String
+            let author: String
             if let user = message.user {
-                who = user == me ? "The user" : await name(user)
+                author = await name(user)
             } else {
-                who = message.username ?? "Bot"
+                author = message.username ?? "Bot"
             }
-            let time = Date(timeIntervalSince1970: Double(message.ts) ?? 0).formatted(date: .abbreviated, time: .shortened)
-            lines.append("[\(time)] \(who): \(await readable(message.text ?? ""))")
+            thread.append(ThreadMessage(
+                author: author,
+                date: Date(timeIntervalSince1970: Double(message.ts) ?? 0),
+                text: await readable(message.text ?? ""),
+                fromMe: message.user == me))
         }
-        return lines.joined(separator: "\n")
+        return thread
     }
 
     private func search(_ query: String) async throws -> [Match] {
@@ -109,14 +112,19 @@ actor Slack {
         return name
     }
 
-    /// Replaces <@U123> mentions with names and unescapes Slack's entities.
+    /// Turns Slack markup into plain text: <@U123> mentions into names, <#C123|general> into #general,
+    /// <https://…|label> links into their label, and unescapes Slack's entities.
     private func readable(_ text: String) async -> String {
         var result = text
         for mention in text.matches(of: #/<@([A-Z0-9]+)(?:\|[^>]*)?>/#) {
             let who = await name(String(mention.1))
             result = result.replacingOccurrences(of: String(mention.0), with: "@\(who)")
         }
-        return result.decodingEntities
+        return result
+            .replacing(#/<#[A-Z0-9]+\|([^>]+)>/#) { "#\($0.1)" }
+            .replacing(#/<(https?:[^|>]+)\|([^>]+)>/#) { String($0.2) }
+            .replacing(#/<(https?:[^>]+)>/#) { String($0.1) }
+            .decodingEntities
     }
 
     private func call<T: Decodable>(_ method: String, _ params: [String: String], as type: T.Type) async throws -> T {

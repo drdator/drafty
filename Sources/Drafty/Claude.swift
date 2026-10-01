@@ -40,7 +40,10 @@ struct Claude: Sendable {
 
     private static let schema = #"{"type":"object","properties":{"needs_reply":{"type":"boolean"},"reason":{"type":"string"},"priority":{"type":"string","enum":["high","medium","low"]},"draft":{"type":"string"}},"required":["needs_reply","reason","priority","draft"],"additionalProperties":false}"#
 
-    func triage(_ message: Message, transcript: String) async throws -> Verdict {
+    func triage(_ message: Message, thread: [ThreadMessage]) async throws -> Verdict {
+        let conversation = thread.map {
+            "[\($0.date.formatted(date: .abbreviated, time: .shortened))] \($0.fromMe ? "The user" : $0.author):\n\($0.text)"
+        }.joined(separator: "\n\n")
         let data = try await Self.run([
             "-p",
             "--model", "claude-opus-5-5",
@@ -58,7 +61,7 @@ struct Claude: Sendable {
             Latest message from: \(message.from)
 
             <conversation>
-            \(transcript)
+            \(conversation)
             </conversation>
             """)
 

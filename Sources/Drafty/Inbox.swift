@@ -23,10 +23,18 @@ struct Message: Codable, Sendable, Identifiable {
     let target: ReplyTarget
 }
 
-/// A message found by a source. The transcript is only fetched for messages we haven't triaged yet.
+/// One message in a conversation, as shown in the thread view and given to Claude.
+struct ThreadMessage: Codable, Sendable {
+    let author: String
+    let date: Date
+    let text: String
+    let fromMe: Bool
+}
+
+/// A message found by a source. The thread is only fetched for messages we haven't triaged yet.
 struct Candidate: Sendable {
     let message: Message
-    let transcript: @Sendable () async throws -> String
+    let thread: @Sendable () async throws -> [ThreadMessage]
 }
 
 enum Priority: String, Codable, Sendable, Comparable {
@@ -47,6 +55,7 @@ struct Item: Codable, Identifiable {
     let message: Message
     let reason: String
     let priority: Priority?  // nil for items saved before priorities existed
+    var thread: [ThreadMessage]?  // the conversation the draft was based on; filled in on the next check if missing
     var draft: String
     var id: String { message.id }
 }
@@ -129,6 +138,13 @@ final class Inbox {
         let current = Set(found.map(\.message.id))
         items.removeAll { fetched.contains($0.message.source) && !current.contains($0.id) }
 
+        for candidate in found where items.contains(where: { $0.id == candidate.message.id && $0.thread == nil }) {
+            let thread = try? await candidate.thread()
+            if let index = items.firstIndex(where: { $0.id == candidate.message.id }) {
+                items[index].thread = thread
+            }
+        }
+
         let known = Set(items.map(\.id))
         let fresh = found
             .filter { handled[$0.message.id] == nil && !known.contains($0.message.id) }
@@ -141,9 +157,10 @@ final class Inbox {
             let message = candidate.message
             status = "Reading \(index + 1) of \(fresh.count)…"
             do {
-                let verdict = try await claude.triage(message, transcript: candidate.transcript())
+                let thread = try await candidate.thread()
+                let verdict = try await claude.triage(message, thread: thread)
                 if verdict.needsReply {
-                    let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, draft: verdict.draft)
+                    let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, thread: thread, draft: verdict.draft)
                     added.append(item)
                     items.append(item)
                 } else {
