@@ -60,10 +60,13 @@ actor Gmail {
                 target: .gmail(replyTo)
             )
             let threadID = thread.id
-            let why = (last.header("To") ?? "").localizedCaseInsensitiveContains(email)
+            let addressedToMe = (last.header("To") ?? "").localizedCaseInsensitiveContains(email)
+            let why = addressedToMe
                 ? "The email is addressed to the user."
                 : "The user is only cc'd or got it through a list, not addressed in To."
-            result.append(Candidate(message: message, why: why) { [self] in try await conversation(threadID) })
+            // Only colleagues: the reply would go to someone in your own domain.
+            let colleague = Self.address(replyTo.to).lowercased().hasSuffix("@" + (email.split(separator: "@").last ?? "").lowercased())
+            result.append(Candidate(message: message, why: why, canAutoReply: addressedToMe && colleague) { [self] in try await conversation(threadID) })
         }
         return result
     }

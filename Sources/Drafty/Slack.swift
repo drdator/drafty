@@ -100,7 +100,9 @@ actor Slack {
             // Reply in the thread if there is one; channel mentions get a new thread, DMs a plain message.
             target: .slack(channel: channel, threadTs: threadTs ?? (isDM ? nil : ts))
         )
-        return Candidate(message: message, why: why) { [self] in
+        // Only DMs and group DMs inside the workspace, never channels or Slack Connect.
+        let canAutoReply = isDM && match.channel.is_ext_shared != true
+        return Candidate(message: message, why: why, canAutoReply: canAutoReply) { [self] in
             try await conversation(channel: channel, threadTs: threadTs, latest: ts)
         }
     }
@@ -221,6 +223,7 @@ actor Slack {
             let name: String?
             let is_im: Bool?
             let is_mpim: Bool?
+            let is_ext_shared: Bool?
         }
 
         var isDM: Bool { channel.is_im == true || channel.is_mpim == true || channel.id.hasPrefix("D") }

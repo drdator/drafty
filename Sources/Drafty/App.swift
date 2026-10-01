@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let notifications = UNUserNotificationCenter.current()
         notifications.delegate = self
         notifications.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        let cancel = UNNotificationAction(identifier: "cancel", title: "Cancel auto-reply")
+        notifications.setNotificationCategories([UNNotificationCategory(identifier: "autoReply", actions: [cancel], intentIdentifiers: [])])
 
         inbox.start()
     }
@@ -87,6 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await showPopover()
+        let action = response.actionIdentifier
+        let item = response.notification.request.content.userInfo["item"] as? String
+        await handleNotification(action: action, item: item)
+    }
+
+    private func handleNotification(action: String, item: String?) {
+        if action == "cancel", let item {
+            inbox.cancelAutoReply(item)
+        } else {
+            showPopover()
+        }
     }
 }

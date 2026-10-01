@@ -8,6 +8,7 @@ enum SortOrder: String {
 struct ContentView: View {
     let inbox: Inbox
     @State private var showSettings = false
+    @State private var showLog = false
     @AppStorage("sortOrder") private var sortOrder = SortOrder.priority
     @AppStorage("theme") private var theme = Theme.system
 
@@ -23,7 +24,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Needs reply").font(.headline)
+                Text(showSettings ? "Settings" : showLog ? "Auto-replies" : "Needs reply").font(.headline)
                 Spacer()
                 if inbox.checking { ProgressView().controlSize(.small) }
                 Menu {
@@ -40,7 +41,11 @@ struct ContentView: View {
                 .help("Sort")
                 Button { Task { await inbox.check() } } label: { Image(systemName: "arrow.clockwise") }
                     .disabled(inbox.checking || !inbox.isConfigured)
-                Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
+                Button { showLog.toggle(); showSettings = false } label: {
+                    Image(systemName: showLog ? "clock.arrow.circlepath.fill" : "clock.arrow.circlepath")
+                }
+                .help("Auto-replies")
+                Button { showSettings.toggle(); showLog = false } label: { Image(systemName: "gearshape") }
             }
             .buttonStyle(.borderless)
             .padding(12)
@@ -51,6 +56,8 @@ struct ContentView: View {
                     showSettings = false
                     Task { await inbox.check() }
                 }
+            } else if showLog {
+                AutoReplyLog(inbox: inbox)
             } else if inbox.items.isEmpty {
                 ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
             } else {
@@ -102,36 +109,7 @@ struct ItemView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                if let priority = item.priority, priority != .low {
-                    Circle()
-                        .fill(priority == .high ? Color.red : Color.orange)
-                        .frame(width: 7, height: 7)
-                        .help("\(priority.rawValue.capitalized) priority")
-                }
-                Image(nsImage: item.message.source == .slack ? Logo.slack : Logo.gmail)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-                Text(item.message.from).fontWeight(.semibold).lineLimit(1)
-                Text(item.message.title).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                Text(item.message.date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if item.thread != nil {
-                    Button { showThread.toggle() } label: {
-                        Image(systemName: showThread ? "text.bubble.fill" : "text.bubble")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.tint)
-                    .help(showThread ? "Hide thread" : "Show thread")
-                }
-                if let link = item.message.link {
-                    Link(destination: link) { Image(systemName: "arrow.up.forward.square") }
-                        .help("Open in \(item.message.source == .slack ? "Slack" : "Gmail")")
-                }
-            }
+            MessageHeader(message: item.message, priority: item.priority, hasThread: item.thread != nil, showThread: $showThread)
             if showThread, let thread = item.thread {
                 ThreadView(thread: thread)
             } else {
@@ -153,6 +131,20 @@ struct ItemView: View {
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
+            }
+            if let sendAt = inbox.autoSendAt[item.id] {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    HStack {
+                        Image(systemName: "paperplane")
+                        Text("Sending automatically in \(max(0, Int(sendAt.timeIntervalSince(context.date).rounded()))) s")
+                        Spacer()
+                        Button("Cancel") { inbox.cancelAutoReply(item.id) }
+                            .themedButton(palette)
+                    }
+                    .font(.system(size: 12))
+                    .padding(8)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Palette.radius))
+                }
             }
             HStack(spacing: 8) {
                 Button("Dismiss") { inbox.dismiss(item) }
@@ -214,6 +206,108 @@ struct ItemView: View {
                 self.error = error.localizedDescription
                 sending = false
             }
+        }
+    }
+}
+
+/// Sender, where it came from and when, with buttons for the thread and for opening it in Slack or Gmail.
+struct MessageHeader: View {
+    let message: Message
+    var priority: Priority?
+    let hasThread: Bool
+    @Binding var showThread: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let priority, priority != .low {
+                Circle()
+                    .fill(priority == .high ? Color.red : Color.orange)
+                    .frame(width: 7, height: 7)
+                    .help("\(priority.rawValue.capitalized) priority")
+            }
+            Image(nsImage: message.source == .slack ? Logo.slack : Logo.gmail)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+            Text(message.from).fontWeight(.semibold).lineLimit(1)
+            Text(message.title).foregroundStyle(.secondary).lineLimit(1)
+            Spacer()
+            Text(message.date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if hasThread {
+                Button { showThread.toggle() } label: {
+                    Image(systemName: showThread ? "text.bubble.fill" : "text.bubble")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.tint)
+                .help(showThread ? "Hide thread" : "Show thread")
+            }
+            if let link = message.link {
+                Link(destination: link) { Image(systemName: "arrow.up.forward.square") }
+                    .help("Open in \(message.source == .slack ? "Slack" : "Gmail")")
+            }
+        }
+    }
+}
+
+/// Replies Drafty sent on its own, newest first.
+struct AutoReplyLog: View {
+    let inbox: Inbox
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if inbox.autoReplies.isEmpty {
+            ContentUnavailableView(
+                "No auto-replies yet",
+                systemImage: "clock.arrow.circlepath",
+                description: Text(inbox.settings.autoReplyLevel == .off
+                                  ? "Auto-reply is off. You can turn it on in Settings."
+                                  : "Replies Drafty sends on its own show up here."))
+        } else {
+            ScrollView {
+                LazyVStack(spacing: palette == nil ? 10 : 0) {
+                    ForEach(inbox.autoReplies) { reply in
+                        AutoReplyRow(reply: reply)
+                        if palette != nil { Hairline() }
+                    }
+                }
+                .padding(palette == nil ? 12 : 0)
+            }
+        }
+    }
+}
+
+struct AutoReplyRow: View {
+    let reply: AutoReply
+    @State private var showThread = false
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MessageHeader(message: reply.message, hasThread: true, showThread: $showThread)
+            if showThread {
+                ThreadView(thread: reply.thread)
+            } else {
+                Text(reply.message.preview)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                Text(reply.reply)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
+            }
+            Text("Sent \(reply.sentAt.formatted(date: .abbreviated, time: .shortened)) · \(reply.level.kind) · \(Int(reply.confidence * 100))% sure")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(palette == nil ? 12 : 16)
+        .background {
+            if palette == nil { RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)) }
         }
     }
 }
@@ -305,6 +399,18 @@ struct SettingsView: View {
     @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
     @State private var pendingToolAccess: ToolAccess?
     @Environment(\.palette) private var palette
+
+    private static let autoReplyRules = """
+        Only DMs with colleagues and email from your own domain. Never high priority, never a draft with a \
+        [placeholder], never to a bot or agent, at most once an hour per conversation, and only when Jev is at \
+        least 90% sure. Each one waits 60 s so you can cancel it, and is listed under the clock icon.
+        """
+
+    private var autoReplyStep: Binding<Double> {
+        Binding(
+            get: { Double(AutoReplyLevel.allCases.firstIndex(of: inbox.settings.autoReplyLevel)!) },
+            set: { inbox.settings.autoReplyLevel = AutoReplyLevel.allCases[Int($0.rounded())] })
+    }
 
     /// More access only takes effect after the warning is accepted; less access applies right away.
     private var toolAccessSelection: Binding<ToolAccess> {
@@ -407,6 +513,27 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                section("Auto-reply") {
+                    HStack(spacing: 12) {
+                        Slider(value: autoReplyStep, in: 0...Double(AutoReplyLevel.allCases.count - 1), step: 1)
+                        Text(inbox.settings.autoReplyLevel.label)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 110, alignment: .trailing)
+                    }
+                    Text(inbox.settings.autoReplyLevel.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Segmented(selection: $inbox.settings.autoReplySources, options: AutoReplySources.allCases) { $0.label }
+                    field("Jev key") { SecureField("TypeSafe API key", text: $inbox.settings.jevKey) }
+                    if inbox.settings.autoReplyLevel != .off && inbox.settings.jevKey.isEmpty {
+                        Text("Auto-reply stays off until you add a Jev key.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text(Self.autoReplyRules)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
                     Toggle("Open at login", isOn: $openAtLogin)
                         .toggleStyle(.switch)
@@ -450,6 +577,36 @@ struct SettingsView: View {
         .padding(.horizontal, 8)
         .frame(height: 24)
         .raised(palette)
+    }
+}
+
+extension AutoReplyLevel {
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .acknowledgements: "Acknowledgements"
+        case .quickAnswers: "Quick answers"
+        case .routine: "Routine"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .off: "Drafty never sends anything on its own."
+        case .acknowledgements: "Sends replies that say nothing new, like “tack”, “kollar” or 👍."
+        case .quickAnswers: "Also short answers fully covered by the conversation, like “funkar för mig” or “fixat nu”."
+        case .routine: "Also low-stakes replies to colleagues that don't commit you to anything new."
+        }
+    }
+}
+
+extension AutoReplySources {
+    var label: String {
+        switch self {
+        case .slack: "Slack"
+        case .email: "Email"
+        case .both: "Both"
+        }
     }
 }
 

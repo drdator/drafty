@@ -21,6 +21,14 @@ struct Message: Codable, Sendable, Identifiable {
     let date: Date
     let link: URL?
     let target: ReplyTarget
+
+    /// Where a reply lands, used to limit auto-replies per conversation.
+    var conversation: String {
+        switch target {
+        case let .slack(channel, threadTs): "slack:\(channel):\(threadTs ?? "")"
+        case let .gmail(reply): "gmail:\(reply.threadId)"
+        }
+    }
 }
 
 /// One message in a conversation, as shown in the thread view and given to Claude.
@@ -35,6 +43,7 @@ struct ThreadMessage: Codable, Sendable {
 struct Candidate: Sendable {
     let message: Message
     let why: String  // how it reached the user (DM, mention, thread they're in, To or Cc), for Claude
+    let canAutoReply: Bool  // a DM with a colleague or an email from your own domain: the only kind auto-reply may answer
     let thread: @Sendable () async throws -> [ThreadMessage]
 }
 
@@ -61,12 +70,73 @@ struct Item: Codable, Identifiable {
     var id: String { message.id }
 }
 
+/// How much Drafty may answer on its own. Each level includes the ones below it.
+enum AutoReplyLevel: String, Codable, CaseIterable, Comparable {
+    case off, acknowledgements, quickAnswers, routine
+
+    static func < (a: AutoReplyLevel, b: AutoReplyLevel) -> Bool {
+        allCases.firstIndex(of: a)! < allCases.firstIndex(of: b)!
+    }
+
+    /// One reply of this kind, as in "Jev is only 36% sure it's a quick answer".
+    var kind: String {
+        switch self {
+        case .off: "Off"
+        case .acknowledgements: "Acknowledgement"
+        case .quickAnswers: "Quick answer"
+        case .routine: "Routine"
+        }
+    }
+}
+
+enum AutoReplySources: String, Codable, CaseIterable {
+    case slack, email, both
+
+    func includes(_ source: Source) -> Bool {
+        switch self {
+        case .slack: source == .slack
+        case .email: source == .gmail
+        case .both: true
+        }
+    }
+}
+
+/// A reply Drafty sent on its own, kept so the user can see what went out.
+struct AutoReply: Codable, Identifiable {
+    let message: Message
+    let thread: [ThreadMessage]  // including the reply that was sent
+    let reply: String
+    let level: AutoReplyLevel
+    let confidence: Double
+    let sentAt: Date
+    var id: String { message.id }
+}
+
 struct Settings: Codable {
     var slackToken = ""
     var googleClientID = ""
     var googleClientSecret = ""
     var googleRefreshToken = ""
     var aboutMe = ""
+    var jevKey = ""
+    var autoReplyLevel = AutoReplyLevel.off
+    var autoReplySources = AutoReplySources.slack
+}
+
+extension Settings {
+    /// Missing keys fall back to their defaults, so adding a setting never throws away the saved ones.
+    init(from decoder: any Decoder) throws {
+        self.init()
+        let saved = try decoder.container(keyedBy: CodingKeys.self)
+        slackToken = try saved.decodeIfPresent(String.self, forKey: .slackToken) ?? slackToken
+        googleClientID = try saved.decodeIfPresent(String.self, forKey: .googleClientID) ?? googleClientID
+        googleClientSecret = try saved.decodeIfPresent(String.self, forKey: .googleClientSecret) ?? googleClientSecret
+        googleRefreshToken = try saved.decodeIfPresent(String.self, forKey: .googleRefreshToken) ?? googleRefreshToken
+        aboutMe = try saved.decodeIfPresent(String.self, forKey: .aboutMe) ?? aboutMe
+        jevKey = try saved.decodeIfPresent(String.self, forKey: .jevKey) ?? jevKey
+        autoReplyLevel = try saved.decodeIfPresent(AutoReplyLevel.self, forKey: .autoReplyLevel) ?? autoReplyLevel
+        autoReplySources = try saved.decodeIfPresent(AutoReplySources.self, forKey: .autoReplySources) ?? autoReplySources
+    }
 }
 
 @MainActor @Observable
@@ -77,6 +147,11 @@ final class Inbox {
     var items: [Item] = [] {
         didSet { save() }
     }
+    var autoReplies: [AutoReply] = [] {
+        didSet { save() }
+    }
+    /// Items that will be sent automatically at the given time unless cancelled.
+    var autoSendAt: [String: Date] = [:]
     var status = ""
     var checking = false
 
@@ -92,11 +167,14 @@ final class Inbox {
     private static let file = URL.applicationSupportDirectory.appending(path: "Drafty/state.json")
     private static let checkInterval = Duration.seconds(180)
     private static let maxTriagePerCheck = 20
+    private static let autoReplyDelay = 60.0
+    private static let autoReplyConfidence = 0.9
 
     private struct Saved: Codable {
         var settings: Settings
         var items: [Item]
         var handled: [String: Date]
+        var autoReplies: [AutoReply]?
     }
 
     init() {
@@ -105,6 +183,7 @@ final class Inbox {
             settings = saved.settings
             items = saved.items
             handled = saved.handled
+            autoReplies = saved.autoReplies ?? []
         }
         makeClients()
     }
@@ -164,6 +243,7 @@ final class Inbox {
                     let item = Item(message: message, reason: verdict.reason, priority: verdict.priority, thread: thread, draft: verdict.draft)
                     added.append(item)
                     items.append(item)
+                    await considerAutoReply(item, why: candidate.why, allowed: candidate.canAutoReply)
                 } else {
                     handled[message.id] = .now
                 }
@@ -172,7 +252,7 @@ final class Inbox {
             }
         }
         handled = handled.filter { $0.value > .now.addingTimeInterval(-14 * 86400) }
-        notify(added)
+        notify(added.filter { autoSendAt[$0.id] == nil })
         status = errors.first ?? "Checked \(Date.now.formatted(date: .omitted, time: .shortened))"
     }
 
@@ -219,6 +299,55 @@ final class Inbox {
     func setDraft(_ id: String, _ draft: String) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].draft = draft
+        cancelAutoReply(id)  // the user is working on it
+    }
+
+    func cancelAutoReply(_ id: String) {
+        guard autoSendAt.removeValue(forKey: id) != nil else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["auto:\(id)"])
+    }
+
+    /// The hard rules come first, in code, so no message can talk its way past them. Then Jev judges the draft.
+    private func considerAutoReply(_ item: Item, why: String, allowed: Bool) async {
+        let settings = settings
+        let anHourAgo = Date.now.addingTimeInterval(-3600)
+        guard settings.autoReplyLevel != .off, !settings.jevKey.isEmpty, allowed,
+              settings.autoReplySources.includes(item.message.source),
+              item.priority != .high,
+              !item.draft.isEmpty,
+              item.draft.firstMatch(of: #/\[[^\]]+\]/#) == nil,  // an unfilled [placeholder]
+              !autoReplies.contains(where: { $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo })
+        else { return }
+
+        do {
+            let decision = try await Jev(key: settings.jevKey).judge(item.message, thread: item.thread ?? [], why: why, draft: item.draft)
+            guard let level = decision.level, level <= settings.autoReplyLevel,
+                  decision.confidence >= Self.autoReplyConfidence, decision.fromAgent < 0.5
+            else { return }
+            scheduleAutoReply(item, level: level, confidence: decision.confidence)
+        } catch {
+            status = "Jev: \(error.localizedDescription)"
+        }
+    }
+
+    private func scheduleAutoReply(_ item: Item, level: AutoReplyLevel, confidence: Double) {
+        autoSendAt[item.id] = .now.addingTimeInterval(Self.autoReplyDelay)
+        notifyAutoReply(item)
+        Task {
+            try? await Task.sleep(for: .seconds(Self.autoReplyDelay))
+            guard autoSendAt.removeValue(forKey: item.id) != nil,
+                  let current = items.first(where: { $0.id == item.id })
+            else { return }
+            do {
+                try await send(current, text: current.draft)
+                let sent = ThreadMessage(author: "You", date: .now, text: current.draft, fromMe: true)
+                let entry = AutoReply(message: current.message, thread: (current.thread ?? []) + [sent], reply: current.draft,
+                                      level: level, confidence: confidence, sentAt: .now)
+                autoReplies = Array(([entry] + autoReplies).prefix(200))
+            } catch {
+                status = "Auto-reply to \(current.message.from) failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     func connectGmail() async {
@@ -253,12 +382,23 @@ final class Inbox {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
+    private func notifyAutoReply(_ item: Item) {
+        let content = UNMutableNotificationContent()
+        content.title = "Auto-replying to \(item.message.from) in \(Int(Self.autoReplyDelay)) s"
+        content.body = item.draft
+        content.categoryIdentifier = "autoReply"
+        content.userInfo = ["item": item.id]
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "auto:\(item.id)", content: content, trigger: nil))
+    }
+
     /// Settings hold API tokens, so the file is only readable by you.
     private func save() {
         do {
             let directory = Self.file.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(Saved(settings: settings, items: items, handled: handled)).write(to: Self.file, options: .atomic)
+            try JSONEncoder().encode(Saved(settings: settings, items: items, handled: handled, autoReplies: autoReplies))
+                .write(to: Self.file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Self.file.path)
         } catch {
             status = "Couldn't save: \(error.localizedDescription)"

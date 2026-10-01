@@ -48,6 +48,19 @@ In Settings, **Auto-generate** (under About you) has Claude describe how you wri
 
 **Redraft with tools** (Settings, off by default) adds a wrench next to ↻ that lets Claude look things up while redrafting: **Read files** gives read-only access to your home folder (no shell, writing or network), **Full access** runs Claude Code with `--dangerously-skip-permissions`. Both read messages other people wrote, so a crafted message could steer them; Settings explains the risk before either is turned on. Automatic checks never use tools.
 
+## Auto-reply
+
+Off by default. In Settings, a slider sets what Drafty may send on its own: **Acknowledgements** (replies that say nothing new, like "tack" or 👍), **Quick answers** (short answers fully covered by the conversation) or **Routine** (low-stakes replies to colleagues that commit you to nothing new), for Slack, email or both.
+
+Claude writes the reply; [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe, needs an API key) decides what kind of reply it is, with a calibrated confidence, and whether the message came from a bot or agent. A reply only goes out on its own when, in addition:
+
+- it's a DM with a colleague (no channels, no Slack Connect) or an email from your own domain addressed to you,
+- it isn't high priority and the draft has no `[placeholder]`,
+- Jev is at least 90% sure of the kind and the sender isn't a bot or agent,
+- nothing was auto-sent in that conversation in the last hour.
+
+Each auto-reply waits 60 seconds first, with a countdown on the item and a notification you can cancel from; editing the draft cancels it too. Everything sent this way is listed under the clock icon, with the thread and a link to open it in Slack or Gmail.
+
 An item drops off the list when you reply anywhere (in the app, Slack or Gmail), when a newer message replaces it, or when you dismiss it. Nothing is sent without you clicking **Send**.
 
 The queries and the lookback window are constants at the top of `Slack.swift` and `Gmail.swift`. Settings and tokens are stored in plain text in `~/Library/Application Support/Drafty/state.json`, readable only by your user (0600).
