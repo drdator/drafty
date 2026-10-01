@@ -182,21 +182,23 @@ extension View {
 }
 
 /// Paper's toggle group, in every theme so it keeps the same width when switching.
-struct ThemePicker: View {
-    @Binding var selection: Theme
+struct Segmented<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [Value]
+    let label: (Value) -> String
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Theme.allCases, id: \.self) { theme in
-                Text(theme.label)
+            ForEach(options, id: \.self) { option in
+                Text(label(option))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(selection == theme ? AnyShapeStyle(palette?.text ?? .primary) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(selection == option ? AnyShapeStyle(palette?.text ?? .primary) : AnyShapeStyle(.secondary))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { if selection == theme { selected } }
+                    .background { if selection == option { selected } }
                     .padding(1)
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = theme }
+                    .onTapGesture { selection = option }
             }
         }
         .frame(height: 24)

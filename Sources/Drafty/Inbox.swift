@@ -194,10 +194,10 @@ final class Inbox {
     }
 
     /// Rewrites a draft with the current About you, taking the user's edits and comment into account.
-    func redraft(_ item: Item, current: String, comment: String) async throws -> String {
+    func redraft(_ item: Item, current: String, comment: String, tools: ToolAccess = .off) async throws -> String {
         try await Claude(aboutMe: settings.aboutMe)
             .redraft(item.message, thread: item.thread ?? [ThreadMessage(author: item.message.from, date: item.message.date, text: item.message.preview, fromMe: false)],
-                     current: current, comment: comment)
+                     current: current, comment: comment, tools: tools)
     }
 
     /// Has Claude rewrite About you from the user's own recent Slack messages and sent email.

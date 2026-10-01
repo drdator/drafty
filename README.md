@@ -46,6 +46,8 @@ The app requests the `gmail.modify` scope so it can read mail, send replies, and
 
 In Settings, **Write from my messages** has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.
 
+**Redraft with tools** (Settings, off by default) adds a wrench next to ↻ that lets Claude look things up while redrafting: **Read files** gives read-only access to your home folder (no shell, writing or network), **Full access** runs Claude Code with `--dangerously-skip-permissions`. Both read messages other people wrote, so a crafted message could steer them; Settings explains the risk before either is turned on. Automatic checks never use tools.
+
 An item drops off the list when you reply anywhere (in the app, Slack or Gmail), when a newer message replaces it, or when you dismiss it. Nothing is sent without you clicking **Send**.
 
 The queries and the lookback window are constants at the top of `Slack.swift` and `Gmail.swift`. Settings and tokens are stored in plain text in `~/Library/Application Support/Drafty/state.json`, readable only by your user (0600).

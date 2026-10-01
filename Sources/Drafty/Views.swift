@@ -90,6 +90,7 @@ struct ItemView: View {
     @State private var comment = ""
     @State private var redrafting = false
     @State private var showThread = false
+    @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
     @State private var error: String?
     @Environment(\.palette) private var palette
 
@@ -159,13 +160,18 @@ struct ItemView: View {
                 HStack(spacing: 4) {
                     TextField("Redraft with a comment…", text: $comment)
                         .textFieldStyle(.plain)
-                        .onSubmit(redraft)
+                        .onSubmit { redraft() }
                     if redrafting {
                         ProgressView().controlSize(.mini)
                     } else {
-                        Button(action: redraft) { Image(systemName: "arrow.clockwise") }
+                        Button { redraft() } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.borderless)
                             .help("Redraft")
+                        if toolAccess != .off {
+                            Button { redraft(tools: toolAccess) } label: { Image(systemName: "wrench.and.screwdriver") }
+                                .buttonStyle(.borderless)
+                                .help(toolAccess == .full ? "Redraft with full access to your computer" : "Redraft, reading your files if useful")
+                        }
                     }
                 }
                 .font(.system(size: 12))
@@ -184,12 +190,12 @@ struct ItemView: View {
         }
     }
 
-    private func redraft() {
+    private func redraft(tools: ToolAccess = .off) {
         redrafting = true
         error = nil
         Task {
             do {
-                draft = try await inbox.redraft(item, current: draft, comment: comment)
+                draft = try await inbox.redraft(item, current: draft, comment: comment, tools: tools)
                 comment = ""
             } catch {
                 self.error = error.localizedDescription
@@ -296,13 +302,29 @@ struct SettingsView: View {
     @State private var writingAboutMe = false
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage("theme") private var theme = Theme.system
+    @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
+    @State private var pendingToolAccess: ToolAccess?
     @Environment(\.palette) private var palette
+
+    /// More access only takes effect after the warning is accepted; less access applies right away.
+    private var toolAccessSelection: Binding<ToolAccess> {
+        Binding(
+            get: { pendingToolAccess ?? toolAccess },
+            set: { level in
+                if level > toolAccess {
+                    pendingToolAccess = level
+                } else {
+                    toolAccess = level
+                    pendingToolAccess = nil
+                }
+            })
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 section("Appearance") {
-                    ThemePicker(selection: $theme)
+                    Segmented(selection: $theme, options: Theme.allCases) { $0.label }
                 }
                 section("Slack") {
                     field("Token") { SecureField("xoxp-…", text: $inbox.settings.slackToken) }
@@ -359,6 +381,32 @@ struct SettingsView: View {
                          : "Drafts are written by Claude Code (`claude -p`) with your subscription.")
                         .foregroundStyle(Claude.executable == nil ? Color.red : Color.secondary)
                 }
+                section("Redraft with tools") {
+                    Segmented(selection: toolAccessSelection, options: ToolAccess.allCases) { $0.label }
+                    if let pending = pendingToolAccess {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(pending.warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 12))
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Spacer()
+                                Button("Cancel") { pendingToolAccess = nil }
+                                    .themedButton(palette)
+                                Button(pending == .full ? "Allow full access" : "Allow reading files") {
+                                    toolAccess = pending
+                                    pendingToolAccess = nil
+                                }
+                                .themedButton(palette, prominent: true)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.orange.opacity(pending == .full ? 0.22 : 0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
+                    } else {
+                        Text(toolAccess.explanation)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Toggle("Open at login", isOn: $openAtLogin)
                         .toggleStyle(.switch)
@@ -402,6 +450,32 @@ struct SettingsView: View {
         .padding(.horizontal, 8)
         .frame(height: 24)
         .raised(palette)
+    }
+}
+
+extension ToolAccess {
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .readFiles: "Read files"
+        case .full: "Full access"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .off: "Redrafts only see the conversation."
+        case .readFiles: "The wrench next to ↻ redrafts with read-only access to your home folder: no shell, no writing, no network. Automatic checks never use tools."
+        case .full: "The wrench next to ↻ redrafts with Claude Code's full access and no permission checks. Automatic checks never use tools."
+        }
+    }
+
+    var warning: String {
+        switch self {
+        case .off: ""
+        case .readFiles: "Claude will be able to read any file in your home folder, including keys and tokens like ~/.ssh and Drafty's own settings, while it reads messages other people wrote. A message written to trick it could get file contents into a draft. It can't run commands or send anything itself, so read drafts before you send them."
+        case .full: "Claude will run with every permission check skipped (‑‑dangerously‑skip‑permissions). It can run any command, change or delete files and use the network, while it reads messages that anyone can send you. A message written to trick it could make it run commands or upload your files without asking you. Only allow this if you accept that risk."
+        }
     }
 }
 
