@@ -1,8 +1,10 @@
 import Foundation
 
-/// Finds DMs and @mentions you haven't answered, and posts replies as you. Uses a user token (xoxp-…).
+/// Finds DMs, @mentions and replies in threads you're in that you haven't answered, and posts replies as you.
+/// Uses a user token (xoxp-…).
 actor Slack {
     private static let lookbackDays = 2.0
+    private static let maxThreads = 20
 
     private let token: String
     private var me: String?
@@ -35,6 +37,9 @@ actor Slack {
         for message in try await mentions {
             incoming.append((message, "It @mentions the user (they're \(handle))."))
         }
+        for message in await threadReplies(to: myMessages) {
+            incoming.append((message, "It's a reply in a channel thread the user has posted in (they're \(handle)); they aren't necessarily the one being addressed."))
+        }
 
         var latest: [String: (match: Match, why: String)] = [:]
         for entry in incoming
@@ -48,6 +53,29 @@ actor Slack {
             result.append(await candidate(match, why: why))
         }
         return result
+    }
+
+    /// The latest message in each channel thread you've recently posted in or started, so replies there
+    /// count even when they don't @mention you.
+    private func threadReplies(to myMessages: [Match]) async -> [Match] {
+        var seen = Set<String>()
+        let threads = myMessages.filter { !$0.isDM && seen.insert($0.key).inserted }.prefix(Self.maxThreads)
+        var replies: [Match] = []
+        for mine in threads {
+            let channel = mine.channel.id
+            let root = mine.threadTs ?? mine.ts
+            guard let thread = try? await call("conversations.replies", ["channel": channel, "ts": root, "limit": "200"], as: History.self).messages,
+                  thread.count > 1, let last = thread.last
+            else { continue }
+            let workspace = mine.permalink.components(separatedBy: "/archives/")[0]
+            replies.append(Match(
+                ts: last.ts,
+                text: last.text ?? "",
+                user: last.user,
+                permalink: "\(workspace)/archives/\(channel)/p\(last.ts.replacingOccurrences(of: ".", with: ""))?thread_ts=\(root)&cid=\(channel)",
+                channel: mine.channel))
+        }
+        return replies
     }
 
     func post(_ text: String, channel: String, threadTs: String?) async throws {
