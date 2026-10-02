@@ -22,56 +22,69 @@ struct ContentView: View {
     }
 
     var body: some View {
+        // Settings is the only page until something is connected, so there's nowhere to go back to then.
+        let onPage = (showSettings || showLog) && inbox.isConfigured
         VStack(spacing: 0) {
             HStack {
-                Text(showSettings ? "Settings" : showLog ? "Auto-replies" : "Needs reply").font(.headline)
+                if onPage {
+                    Button { showSettings = false; showLog = false } label: { Image(systemName: "chevron.left") }
+                        .help("Back to messages")
+                }
+                Text(showSettings || !inbox.isConfigured ? "Settings" : showLog ? "Auto-replies" : "Needs reply").font(.headline)
                 Spacer()
                 if inbox.checking { ProgressView().controlSize(.small) }
-                Menu {
-                    Picker("Sort by", selection: $sortOrder) {
-                        Text("Priority").tag(SortOrder.priority)
-                        Text("Newest first").tag(SortOrder.newest)
+                if !onPage {
+                    Menu {
+                        Picker("Sort by", selection: $sortOrder) {
+                            Text("Priority").tag(SortOrder.priority)
+                            Text("Newest first").tag(SortOrder.newest)
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
                     }
-                    .pickerStyle(.inline)
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Sort")
                 }
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Sort")
                 Button { Task { await inbox.check() } } label: { Image(systemName: "arrow.clockwise") }
                     .disabled(inbox.checking || !inbox.isConfigured)
-                Button { showLog.toggle(); showSettings = false } label: {
-                    Image(systemName: showLog ? "clock.arrow.circlepath.fill" : "clock.arrow.circlepath")
-                }
-                .help("Auto-replies")
+                Button { showLog.toggle(); showSettings = false } label: { Image(systemName: "clock.arrow.circlepath") }
+                    .foregroundStyle(showLog ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    .help("Auto-replies")
                 Button { showSettings.toggle(); showLog = false } label: { Image(systemName: "gearshape") }
+                    .foregroundStyle(showSettings ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    .help("Settings")
             }
             .buttonStyle(.borderless)
             .padding(12)
             Hairline()
 
-            if showSettings || !inbox.isConfigured {
-                SettingsView(inbox: inbox) {
-                    showSettings = false
-                    Task { await inbox.check() }
-                }
-            } else if showLog {
-                AutoReplyLog(inbox: inbox)
-            } else if inbox.items.isEmpty {
-                ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
-            } else {
-                ScrollView {
-                    // Cards on glass; flat sections divided by hairlines in the solid themes.
-                    LazyVStack(spacing: theme.palette == nil ? 10 : 0) {
-                        ForEach(sortedItems) { item in
-                            ItemView(inbox: inbox, item: item)
-                            if theme.palette != nil { Hairline() }
-                        }
+            Group {
+                if showSettings || !inbox.isConfigured {
+                    SettingsView(inbox: inbox) {
+                        showSettings = false
+                        Task { await inbox.check() }
                     }
-                    .padding(theme.palette == nil ? 12 : 0)
+                } else if showLog {
+                    AutoReplyLog(inbox: inbox)
+                } else if inbox.items.isEmpty {
+                    ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
+                } else {
+                    ScrollView {
+                        // Cards on glass; flat sections divided by hairlines in the solid themes.
+                        LazyVStack(spacing: theme.palette == nil ? 10 : 0) {
+                            ForEach(sortedItems) { item in
+                                ItemView(inbox: inbox, item: item)
+                                if theme.palette != nil { Hairline() }
+                            }
+                        }
+                        .padding(theme.palette == nil ? 12 : 0)
+                    }
                 }
             }
+            // Fill the popover so the header stays at the top, even on a short page.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Hairline()
             Text(inbox.status)
