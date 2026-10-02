@@ -116,13 +116,13 @@ struct DryRunResult: Identifiable {
     var id: String { item.id }
 }
 
-/// A reply Drafty sent on its own, kept so the user can see what went out.
-struct AutoReply: Codable, Identifiable {
+/// A reply that went out from Drafty, kept so the user can see what was sent.
+struct SentReply: Codable, Identifiable {
     let message: Message
     let thread: [ThreadMessage]  // including the reply that was sent
     let reply: String
-    let level: AutoReplyLevel
-    let confidence: Double
+    let level: AutoReplyLevel?  // set when Drafty sent it on its own
+    let confidence: Double?
     let sentAt: Date
     var id: String { message.id }
 }
@@ -162,7 +162,7 @@ final class Inbox {
     var items: [Item] = [] {
         didSet { save() }
     }
-    var autoReplies: [AutoReply] = [] {
+    var sent: [SentReply] = [] {
         didSet { save() }
     }
     /// Items that will be sent automatically at the given time unless cancelled.
@@ -191,7 +191,7 @@ final class Inbox {
         var settings: Settings
         var items: [Item]
         var handled: [String: Date]
-        var autoReplies: [AutoReply]?
+        var sent: [SentReply]?
     }
 
     init() {
@@ -200,7 +200,7 @@ final class Inbox {
             settings = saved.settings
             items = saved.items
             handled = saved.handled
-            autoReplies = saved.autoReplies ?? []
+            sent = saved.sent ?? []
         }
         makeClients()
     }
@@ -280,7 +280,7 @@ final class Inbox {
         status = errors.first ?? "Checked \(Date.now.formatted(date: .omitted, time: .shortened))"
     }
 
-    func send(_ item: Item, text: String) async throws {
+    func send(_ item: Item, text: String, auto: (level: AutoReplyLevel, confidence: Double)? = nil) async throws {
         switch item.message.target {
         case let .slack(channel, threadTs):
             guard let slack else { throw AppError("Slack isn't connected") }
@@ -289,6 +289,10 @@ final class Inbox {
             guard let gmail else { throw AppError("Gmail isn't connected") }
             try await gmail.reply(text, to: replyTo)
         }
+        let reply = ThreadMessage(author: "You", date: .now, text: text, fromMe: true)
+        let entry = SentReply(message: item.message, thread: (item.thread ?? []) + [reply], reply: text,
+                              level: auto?.level, confidence: auto?.confidence, sentAt: .now)
+        sent = Array(([entry] + sent).prefix(200))
         dismiss(item)
     }
 
@@ -360,7 +364,7 @@ final class Inbox {
         if item.priority == .high { return .kept("High priority") }
         if item.draft.isEmpty { return .kept("No draft") }
         if let placeholder = item.draft.firstPlaceholder { return .kept("The draft has \(placeholder)") }
-        if autoReplies.contains(where: { $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo }) {
+        if sent.contains(where: { $0.level != nil && $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo }) {
             return .kept("Already auto-replied in this conversation within the hour")
         }
 
@@ -387,11 +391,7 @@ final class Inbox {
                   let current = items.first(where: { $0.id == item.id })
             else { return }
             do {
-                try await send(current, text: current.draft)
-                let sent = ThreadMessage(author: "You", date: .now, text: current.draft, fromMe: true)
-                let entry = AutoReply(message: current.message, thread: (current.thread ?? []) + [sent], reply: current.draft,
-                                      level: level, confidence: confidence, sentAt: .now)
-                autoReplies = Array(([entry] + autoReplies).prefix(200))
+                try await send(current, text: current.draft, auto: (level, confidence))
             } catch {
                 status = "Auto-reply to \(current.message.from) failed: \(error.localizedDescription)"
             }
@@ -445,7 +445,7 @@ final class Inbox {
         do {
             let directory = Self.file.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(Saved(settings: settings, items: items, handled: handled, autoReplies: autoReplies))
+            try JSONEncoder().encode(Saved(settings: settings, items: items, handled: handled, sent: sent))
                 .write(to: Self.file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Self.file.path)
         } catch {

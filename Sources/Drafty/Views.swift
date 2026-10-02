@@ -30,7 +30,7 @@ struct ContentView: View {
                     Button { showSettings = false; showLog = false } label: { Image(systemName: "chevron.left") }
                         .help("Back to messages")
                 }
-                Text(showSettings || !inbox.isConfigured ? "Settings" : showLog ? "Auto-replies" : "Needs reply").font(.headline)
+                Text(showSettings || !inbox.isConfigured ? "Settings" : showLog ? "Sent" : "Needs reply").font(.headline)
                 Spacer()
                 if inbox.checking { ProgressView().controlSize(.small) }
                 if !onPage {
@@ -51,7 +51,7 @@ struct ContentView: View {
                     .disabled(inbox.checking || !inbox.isConfigured)
                 Button { showLog.toggle(); showSettings = false } label: { Image(systemName: "clock.arrow.circlepath") }
                     .foregroundStyle(showLog ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                    .help("Auto-replies")
+                    .help("Sent replies")
                 Button { showSettings.toggle(); showLog = false } label: { Image(systemName: "gearshape") }
                     .foregroundStyle(showSettings ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                     .help("Settings")
@@ -67,7 +67,7 @@ struct ContentView: View {
                         Task { await inbox.check() }
                     }
                 } else if showLog {
-                    AutoReplyLog(inbox: inbox)
+                    SentLog(inbox: inbox)
                 } else if inbox.items.isEmpty {
                     ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
                 } else {
@@ -345,24 +345,22 @@ struct DryRunRow: View {
     }
 }
 
-/// Replies Drafty sent on its own, newest first.
-struct AutoReplyLog: View {
+/// Replies sent from Drafty, by the user or on its own, newest first.
+struct SentLog: View {
     let inbox: Inbox
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if inbox.autoReplies.isEmpty {
+        if inbox.sent.isEmpty {
             ContentUnavailableView(
-                "No auto-replies yet",
+                "Nothing sent yet",
                 systemImage: "clock.arrow.circlepath",
-                description: Text(inbox.settings.autoReplyLevel == .off
-                                  ? "Auto-reply is off. You can turn it on in Settings."
-                                  : "Replies Drafty sends on its own show up here."))
+                description: Text("Replies you send from Drafty show up here, and so do the ones it sends on its own."))
         } else {
             ScrollView {
                 LazyVStack(spacing: palette == nil ? 10 : 0) {
-                    ForEach(inbox.autoReplies) { reply in
-                        AutoReplyRow(reply: reply)
+                    ForEach(inbox.sent) { reply in
+                        SentRow(reply: reply)
                         if palette != nil { Hairline() }
                     }
                 }
@@ -372,8 +370,8 @@ struct AutoReplyLog: View {
     }
 }
 
-struct AutoReplyRow: View {
-    let reply: AutoReply
+struct SentRow: View {
+    let reply: SentReply
     @State private var showThread = false
     @Environment(\.palette) private var palette
 
@@ -395,9 +393,23 @@ struct AutoReplyRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
             }
-            Text("Sent \(reply.sentAt.formatted(date: .abbreviated, time: .shortened)) · \(reply.level.kind) · \(Int(reply.confidence * 100))% sure")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if let level = reply.level {
+                    HStack(spacing: 3) { Image(systemName: "sparkles"); Text("Auto") }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
+                        .help("Drafty sent this on its own")
+                    Text("\(reply.sentAt.formatted(date: .abbreviated, time: .shortened)) · \(level.kind) · \(Int((reply.confidence ?? 0) * 100))% sure")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Sent \(reply.sentAt.formatted(date: .abbreviated, time: .shortened))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption)
         }
         .padding(palette == nil ? 12 : 16)
         .background {

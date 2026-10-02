@@ -61,7 +61,7 @@ Claude writes the reply; [Jev](https://typesafe.ai/blog/introducing-system-one-m
 
 **Dry run** (under the slider) checks the messages in your list right now and shows what would be sent, word for word, or why each one stays with you, without sending anything. The results follow the slider and the Slack / Email setting as you change them.
 
-Each auto-reply waits 60 seconds first, with a countdown on the item and a notification you can cancel from; editing the draft cancels it too. Everything sent this way is listed under the clock icon, with the thread and a link to open it in Slack or Gmail.
+Each auto-reply waits 60 seconds first, with a countdown on the item and a notification you can cancel from; editing the draft cancels it too. Everything you send from Drafty is listed under the clock icon, with the thread and a link to open it in Slack or Gmail; the ones it sent on its own are marked Auto.
 
 An item drops off the list when you reply anywhere (in the app, Slack or Gmail), when a newer message replaces it, or when you dismiss it. Nothing is sent without you clicking **Send**.
 
