@@ -113,6 +113,7 @@ struct ItemView: View {
     @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
     @State private var error: String?
     @State private var unfilled: String?  // a [placeholder] the user is asked to confirm before sending
+    @FocusState private var editing: Bool
     @Environment(\.palette) private var palette
 
     init(inbox: Inbox, item: Item) {
@@ -135,6 +136,7 @@ struct ItemView: View {
             Text(item.reason).font(.callout).italic()
 
             TextEditor(text: $draft)
+                .focused($editing)
                 .font(.body)
                 .scrollContentBackground(.hidden)
                 .padding(4)
@@ -210,6 +212,9 @@ struct ItemView: View {
                 }
                     .themedButton(palette, prominent: true)
                     .disabled(sending || redrafting || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    // Every item has a Send button, so ⌘↩ belongs to the one whose draft is being edited.
+                    .keyboardShortcut(editing ? KeyboardShortcut(.return, modifiers: .command) : nil)
+                    .help("Send (⌘↩)")
             }
         }
         .padding(palette == nil ? 12 : 16)
