@@ -43,7 +43,8 @@ actor Slack {
 
         var latest: [String: (match: Match, why: String)] = [:]
         for entry in incoming
-        where entry.match.user != nil && entry.match.user != me && entry.match.user != "USLACKBOT"
+        // Slack's own system messages come from USLACKBOT and USLACK.
+        where entry.match.user != nil && entry.match.user != me && !(entry.match.user ?? "").hasPrefix("USLACK")
             && entry.match.ts > latest[entry.match.key]?.match.ts ?? "" {
             latest[entry.match.key] = entry
         }

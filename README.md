@@ -40,8 +40,8 @@ The app requests the `gmail.modify` scope so it can read mail, send replies, and
 
 ## How it decides
 
-- **Slack:** It looks at DMs to you (`to:me`) and @mentions from the last 2 days. A conversation counts as answered when your latest message in it (`from:me`) is newer than theirs.
-- **Gmail:** It looks at inbox threads from the last 2 days, skipping Promotions, Social, Updates and Forums, and keeps the ones where the last message isn't yours.
+- **Slack:** It looks at DMs to you (`to:me`), @mentions, and replies in channel threads you've posted in, from the last 2 days. Slack's own system messages are skipped. A conversation counts as answered when your latest message in it (`from:me`) is newer than theirs.
+- **Gmail:** It looks at inbox threads from the last 2 days, skipping Promotions, Social, Updates and Forums, and keeps the ones where the last message isn't yours. Automated mail, bulk mail from outside your domain and noreply senders are skipped before Claude sees them.
 - **Claude:** Each new message goes to Opus 5.5 once, with the surrounding thread, through `claude -p`. Claude decides whether it needs a reply and drafts one in the same call. Claude Code runs with no tools, settings, hooks or MCP servers (`--tools "" --restricted --strict-mcp-config`), since the input is mail from strangers. Write who you are and how you like to sound in **About you**.
 
 In Settings, **Auto-generate** (under About you) has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.

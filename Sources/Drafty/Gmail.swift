@@ -31,13 +31,15 @@ actor Gmail {
 
     func candidates() async throws -> [Candidate] {
         let email = try await myEmail()
+        let domain = "@" + (email.split(separator: "@").last ?? "").lowercased()
         let list: ThreadList = try await get("threads", [.init(name: "q", value: Self.query), .init(name: "maxResults", value: "25")])
         var result: [Candidate] = []
         for ref in list.threads ?? [] {
             let thread: MailThread = try await get("threads/\(ref.id)", [.init(name: "format", value: "metadata")]
-                + ["From", "To", "Reply-To", "Subject", "Message-ID", "References"].map { .init(name: "metadataHeaders", value: $0) })
+                + ["From", "To", "Reply-To", "Subject", "Message-ID", "References", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted"]
+                .map { .init(name: "metadataHeaders", value: $0) })
             guard let last = thread.messages.last(where: { !$0.labels.contains("DRAFT") }),
-                  !last.labels.contains("SENT") else { continue }
+                  !last.labels.contains("SENT"), !Self.isAutomated(last, domain: domain) else { continue }
 
             let from = last.header("From") ?? ""
             let subject = last.header("Subject") ?? "(no subject)"
@@ -65,7 +67,7 @@ actor Gmail {
                 ? "The email is addressed to the user."
                 : "The user is only cc'd or got it through a list, not addressed in To."
             // Only colleagues: the reply would go to someone in your own domain.
-            let colleague = Self.address(replyTo.to).lowercased().hasSuffix("@" + (email.split(separator: "@").last ?? "").lowercased())
+            let colleague = Self.address(replyTo.to).lowercased().hasSuffix(domain)
             result.append(Candidate(message: message, why: why, canAutoReply: addressedToMe && colleague) { [self] in try await conversation(threadID) })
         }
         return result
@@ -148,6 +150,17 @@ actor Gmail {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
         _ = try await http(request)
+    }
+
+    /// Mail no person is waiting on, skipped before Claude sees it: automated mail, bulk mail from outside your
+    /// domain (internal group lists carry the same headers), and noreply senders you couldn't answer anyway.
+    private static func isAutomated(_ message: Msg, domain: String) -> Bool {
+        let from = address(message.header("From") ?? "").lowercased()
+        let automated = (message.header("Auto-Submitted") ?? "no").lowercased() != "no"
+        let bulk = message.header("List-Unsubscribe") != nil || message.header("List-Id") != nil
+            || ["bulk", "list", "junk"].contains((message.header("Precedence") ?? "").lowercased())
+        let noReply = ["noreply", "no-reply", "donotreply"].contains { from.contains($0) } && message.header("Reply-To") == nil
+        return automated || (bulk && !from.hasSuffix(domain)) || noReply
     }
 
     private static func displayName(_ header: String) -> String {
