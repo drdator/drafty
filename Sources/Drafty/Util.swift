@@ -17,6 +17,11 @@ func http(_ request: URLRequest) async throws -> Data {
 }
 
 extension String {
+    /// The first unfilled [placeholder] Claude left in a draft, like "[tid]".
+    var firstPlaceholder: String? {
+        firstMatch(of: #/\[[^\]]+\]/#).map { String($0.0) }
+    }
+
     var decodingEntities: String {
         [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " "), ("&amp;", "&")]
             .reduce(self) { $0.replacingOccurrences(of: $1.0, with: $1.1) }

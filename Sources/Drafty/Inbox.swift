@@ -359,7 +359,7 @@ final class Inbox {
         }
         if item.priority == .high { return .kept("High priority") }
         if item.draft.isEmpty { return .kept("No draft") }
-        if item.draft.firstMatch(of: #/\[[^\]]+\]/#) != nil { return .kept("The draft has a [placeholder]") }
+        if let placeholder = item.draft.firstPlaceholder { return .kept("The draft has \(placeholder)") }
         if autoReplies.contains(where: { $0.message.conversation == item.message.conversation && $0.sentAt > anHourAgo }) {
             return .kept("Already auto-replied in this conversation within the hour")
         }

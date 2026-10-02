@@ -112,6 +112,7 @@ struct ItemView: View {
     @State private var showThread = false
     @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
     @State private var error: String?
+    @State private var unfilled: String?  // a [placeholder] the user is asked to confirm before sending
     @Environment(\.palette) private var palette
 
     init(inbox: Inbox, item: Item) {
@@ -140,10 +141,30 @@ struct ItemView: View {
                 .frame(minHeight: 70, maxHeight: 160)
                 .raised(palette)
                 .disabled(redrafting)
-                .onChange(of: draft) { inbox.setDraft(item.id, draft) }
+                .onChange(of: draft) {
+                    inbox.setDraft(item.id, draft)
+                    unfilled = nil
+                }
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
+            }
+            if let unfilled {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("This draft still has \(unfilled).")
+                    Spacer()
+                    Button("Cancel") { self.unfilled = nil }
+                        .themedButton(palette)
+                    Button("Send anyway") {
+                        self.unfilled = nil
+                        send()
+                    }
+                    .themedButton(palette, prominent: true)
+                }
+                .font(.system(size: 12))
+                .padding(8)
+                .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: Palette.radius))
             }
             if let sendAt = inbox.autoSendAt[item.id] {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -184,7 +205,9 @@ struct ItemView: View {
                 .frame(height: 24)
                 .raised(palette)
                 .disabled(redrafting || sending)
-                Button(sending ? "Sending…" : "Send") { send() }
+                Button(sending ? "Sending…" : "Send") {
+                    if let placeholder = draft.firstPlaceholder { unfilled = placeholder } else { send() }
+                }
                     .themedButton(palette, prominent: true)
                     .disabled(sending || redrafting || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
