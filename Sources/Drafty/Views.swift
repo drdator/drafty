@@ -71,15 +71,21 @@ struct ContentView: View {
                 } else if inbox.items.isEmpty {
                     ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
                 } else {
-                    ScrollView {
-                        // Cards on glass; flat sections divided by hairlines in the solid themes.
-                        LazyVStack(spacing: theme.palette == nil ? 10 : 0) {
-                            ForEach(sortedItems) { item in
-                                ItemView(inbox: inbox, item: item)
-                                if theme.palette != nil { Hairline() }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            // Cards on glass; flat sections divided by hairlines in the solid themes.
+                            LazyVStack(spacing: theme.palette == nil ? 10 : 0) {
+                                ForEach(sortedItems) { item in
+                                    ItemView(inbox: inbox, item: item)
+                                    if theme.palette != nil { Hairline() }
+                                }
                             }
+                            .padding(theme.palette == nil ? 12 : 0)
                         }
-                        .padding(theme.palette == nil ? 12 : 0)
+                        // Show the draft that just came back from Claude Code.
+                        .task(id: inbox.fromClaudeCode) {
+                            if let id = inbox.fromClaudeCode { proxy.scrollTo(id, anchor: .top) }
+                        }
                     }
                 }
             }
@@ -96,6 +102,9 @@ struct ContentView: View {
                 .padding(.vertical, 6)
         }
         .frame(width: 440, height: 620)
+        .onChange(of: inbox.fromClaudeCode) {
+            if inbox.fromClaudeCode != nil { showSettings = false; showLog = false }
+        }
         .background(theme.palette?.panel ?? .clear)
         .preferredColorScheme(theme.palette?.scheme)
         .environment(\.palette, theme.palette)
@@ -150,7 +159,14 @@ struct ItemView: View {
                     inbox.setDraft(item.id, draft)
                     unfilled = nil
                 }
+                // The draft can also change outside this view, when Claude Code hands one back.
+                .onChange(of: item.draft) { if item.draft != draft { draft = item.draft } }
 
+            if inbox.fromClaudeCode == item.id {
+                Label("Updated from Claude Code", systemImage: "terminal")
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+            }
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)

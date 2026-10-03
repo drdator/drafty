@@ -21,6 +21,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
+    <key>CFBundleURLTypes</key>
+    <array><dict>
+        <key>CFBundleURLName</key><string>com.einar.drafty</string>
+        <key>CFBundleURLSchemes</key><array><string>drafty</string></array>
+    </dict></array>
     <key>NSAppleEventsUsageDescription</key><string>Drafty opens Claude Code in a new terminal window.</string>
 </dict>
 </plist>

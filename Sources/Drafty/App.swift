@@ -40,6 +40,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         inbox.start()
     }
 
+    /// drafty://reply/<token>: a Claude Code session handing back the reply it wrote (see Terminal).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let reply = Terminal.reply(from: url) else { continue }
+            if !inbox.useReply(reply.text, for: reply.itemID) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(reply.text, forType: .string)
+                inbox.status = "That message is no longer in Drafty, so the reply from Claude Code is on your clipboard"
+            }
+            showPopover()
+        }
+    }
+
     @objc private func togglePopover() {
         popover.isShown ? popover.performClose(nil) : showPopover()
     }

@@ -2,8 +2,12 @@ import AppKit
 
 /// Opens Claude Code in a new terminal window, started with a prompt about a message and the user's draft, so they
 /// can dig into it with their own setup: skills, MCP servers and permissions. Ghostty if it's installed, else Terminal.
+/// When the reply is ready, the session writes it to a file and opens drafty://reply/<token> to hand it back.
 enum Terminal {
+    private static let replies = URL.applicationSupportDirectory.appending(path: "Drafty/replies")
+
     static func openClaude(about message: Message, draft: String) async throws {
+        try FileManager.default.createDirectory(at: replies, withIntermediateDirectories: true)
         // The prompt goes through a file, so no message text is ever typed into the shell. It's removed once read.
         let file = FileManager.default.temporaryDirectory.appending(path: "drafty-\(UUID().uuidString).txt")
         try Data(prompt(message, draft: draft).utf8).write(to: file)
@@ -57,10 +61,26 @@ enum Terminal {
         case let .gmail(reply): "Read Gmail thread \(reply.threadId) (\"\(reply.subject)\") for context."
         }
         prompt += " I'm replying to the latest message from \(message.from)."
+        let token = Data(message.id.utf8).base64URL
+        prompt += """
+             When I say the reply is ready, write only the reply text to \(replies.appending(path: "\(token).txt").path), \
+            then run `open drafty://reply/\(token)` to put it back in Drafty.
+            """
         if !draft.isEmpty {
             prompt += " My draft so far:\n\n\(draft)"
         }
         return prompt
     }
 
+    /// The reply a Claude Code session handed back with drafty://reply/<token>, and the item it's for.
+    /// The file is removed once read.
+    static func reply(from url: URL) -> (itemID: String, text: String)? {
+        let token = url.lastPathComponent
+        guard url.scheme == "drafty", url.host() == "reply",
+              let id = Data(base64URL: token).map({ String(decoding: $0, as: UTF8.self) }) else { return nil }
+        let file = replies.appending(path: "\(token).txt")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        try? FileManager.default.removeItem(at: file)
+        return (id, text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 }

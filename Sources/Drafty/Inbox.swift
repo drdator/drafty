@@ -171,6 +171,8 @@ final class Inbox {
     var sent: [SentReply] = [] {
         didSet { save() }
     }
+    /// The item whose draft came back from a Claude Code session most recently, until the user edits it.
+    var fromClaudeCode: String?
     /// Items that will be sent automatically at the given time unless cancelled.
     var autoSendAt: [String: Date] = [:]
     var dryRun: [DryRunResult]?
@@ -350,9 +352,19 @@ final class Inbox {
     }
 
     func setDraft(_ id: String, _ draft: String) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].draft != draft else { return }
         items[index].draft = draft
         cancelAutoReply(id)  // the user is working on it
+        if fromClaudeCode == id { fromClaudeCode = nil }
+    }
+
+    /// Makes a reply written in a Claude Code session the item's draft. False when the item is gone.
+    func useReply(_ text: String, for id: String) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        cancelAutoReply(id)
+        items[index].draft = text
+        fromClaudeCode = id
+        return true
     }
 
     func cancelAutoReply(_ id: String) {
