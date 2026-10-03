@@ -126,7 +126,8 @@ struct ItemView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MessageHeader(message: item.message, priority: item.priority, hasThread: item.thread != nil, showThread: $showThread)
+            MessageHeader(message: item.message, priority: item.priority, hasThread: item.thread != nil, showThread: $showThread,
+                          openInClaude: openClaude)
             if showThread, let thread = item.thread {
                 ThreadView(thread: thread)
             } else {
@@ -263,6 +264,17 @@ struct ItemView: View {
         }
     }
 
+    private func openClaude() {
+        error = nil
+        Task {
+            do {
+                try await Terminal.openClaude(about: item.message, draft: draft)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     private func ask() {
         let question = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
@@ -294,12 +306,13 @@ struct ItemView: View {
     }
 }
 
-/// Sender, where it came from and when, with buttons for the thread and for opening it in Slack or Gmail.
+/// Sender, where it came from and when, with buttons for the thread, for Claude Code and for opening it in Slack or Gmail.
 struct MessageHeader: View {
     let message: Message
     var priority: Priority?
     let hasThread: Bool
     @Binding var showThread: Bool
+    var openInClaude: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -326,6 +339,12 @@ struct MessageHeader: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.tint)
                 .help(showThread ? "Hide thread" : "Show thread")
+            }
+            if let openInClaude {
+                Button(action: openInClaude) { Image(systemName: "terminal") }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.tint)
+                    .help("Open in Claude Code, with your draft")
             }
             if let link = message.link {
                 Link(destination: link) { Image(systemName: "arrow.up.forward.square") }
