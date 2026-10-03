@@ -209,7 +209,7 @@ struct ItemView: View {
                             Image(systemName: showChat ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
                         }
                         .buttonStyle(.borderless)
-                        .help(showChat ? "Hide chat" : "Chat about this draft")
+                        .help(showChat ? "Hide chat" : chatHelp)
                         Button { redraft() } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.borderless)
                             .help(showChat ? "Redraft using the chat" : "Redraft")
@@ -255,6 +255,14 @@ struct ItemView: View {
         }
     }
 
+    private var chatHelp: String {
+        switch toolAccess {
+        case .off: "Chat about this draft"
+        case .readFiles: "Chat about this draft, reading your files if useful"
+        case .full: "Chat about this draft, with full access to your computer"
+        }
+    }
+
     private func ask() {
         let question = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
@@ -263,7 +271,7 @@ struct ItemView: View {
         comment = ""
         Task {
             do {
-                try await inbox.ask(item, question)
+                try await inbox.ask(item, question, tools: toolAccess)
             } catch {
                 self.error = error.localizedDescription
                 comment = question
@@ -628,7 +636,7 @@ struct SettingsView: View {
                          : "Drafts are written by Claude Code (`claude -p`) with your subscription.")
                         .foregroundStyle(Claude.executable == nil ? Color.red : Color.secondary)
                 }
-                section("Redraft with tools") {
+                section("Chat and redraft with tools") {
                     Segmented(selection: toolAccessSelection, options: ToolAccess.allCases) { $0.label }
                     if let pending = pendingToolAccess {
                         VStack(alignment: .leading, spacing: 10) {
@@ -773,9 +781,9 @@ extension ToolAccess {
 
     var explanation: String {
         switch self {
-        case .off: "Redrafts only see the conversation."
-        case .readFiles: "The wrench next to ↻ redrafts with read-only access to your home folder: no shell, no writing, no network. Automatic checks never use tools."
-        case .full: "The wrench next to ↻ redrafts with Claude Code's full access and no permission checks. Automatic checks never use tools."
+        case .off: "The chat and redrafts only see the conversation."
+        case .readFiles: "The chat, and the wrench next to ↻, get read-only access to your home folder: no shell, no writing, no network. Automatic checks never use tools."
+        case .full: "The chat, and the wrench next to ↻, get Claude Code's full access with no permission checks. Automatic checks never use tools."
         }
     }
 

@@ -315,14 +315,14 @@ final class Inbox {
     }
 
     /// Asks Claude about an item in its side chat, or gives it context for the next draft.
-    func ask(_ item: Item, _ question: String) async throws {
+    func ask(_ item: Item, _ question: String, tools: ToolAccess = .off) async throws {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         cancelAutoReply(item.id)  // the user is working on it
         items[index].chat = (items[index].chat ?? []) + [ThreadMessage(author: "You", date: .now, text: question, fromMe: true)]
         let current = items[index]
         do {
             let answer = try await Claude(aboutMe: settings.aboutMe)
-                .chat(about: current.message, thread: current.messages, draft: current.draft, chat: current.chat ?? [])
+                .chat(about: current.message, thread: current.messages, draft: current.draft, chat: current.chat ?? [], tools: tools)
             if let index = items.firstIndex(where: { $0.id == item.id }) {
                 items[index].chat?.append(ThreadMessage(author: "Claude", date: .now, text: answer, fromMe: false))
             }

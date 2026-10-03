@@ -46,7 +46,7 @@ The app requests the `gmail.modify` scope so it can read mail, send replies, and
 
 In Settings, **Auto-generate** (under About you) has Claude describe how you write, from your last 500 Slack messages and 40 sent emails, and puts it in About you so drafts sound like you.
 
-**Redraft with tools** (Settings, off by default) adds a wrench next to ↻ that lets Claude look things up while redrafting: **Read files** gives read-only access to your home folder (no shell, writing or network), **Full access** runs Claude Code with `--dangerously-skip-permissions`. Both read messages other people wrote, so a crafted message could steer them; Settings explains the risk before either is turned on. Automatic checks never use tools.
+**Chat and redraft with tools** (Settings, off by default) lets Claude look things up in the chat, and adds a wrench next to ↻ for redrafting with tools: **Read files** gives read-only access to your home folder (no shell, writing or network), **Full access** runs Claude Code with `--dangerously-skip-permissions`. Both read messages other people wrote, so a crafted message could steer them; Settings explains the risk before either is turned on. Automatic checks never use tools.
 
 ## Auto-reply
 
