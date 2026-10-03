@@ -110,6 +110,8 @@ struct ItemView: View {
     @State private var comment = ""
     @State private var redrafting = false
     @State private var showThread = false
+    @State private var showChat = false
+    @State private var asking = false
     @AppStorage("toolAccess") private var toolAccess = ToolAccess.off
     @State private var error: String?
     @State private var unfilled: String?  // a [placeholder] the user is asked to confirm before sending
@@ -148,6 +150,7 @@ struct ItemView: View {
                     unfilled = nil
                 }
 
+
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
@@ -182,19 +185,34 @@ struct ItemView: View {
                     .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Palette.radius))
                 }
             }
+            if showChat {
+                if let chat = item.chat, !chat.isEmpty {
+                    ThreadView(thread: chat)
+                } else {
+                    Text("Ask about the message or add context, then ↻ for a new draft that uses it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             HStack(spacing: 8) {
                 Button("Dismiss") { inbox.dismiss(item) }
                     .themedButton(palette)
                 HStack(spacing: 4) {
-                    TextField("Redraft with a comment…", text: $comment)
+                    // With the chat open, the field asks Claude instead of redrafting.
+                    TextField(showChat ? "Ask or add context…" : "Redraft with a comment…", text: $comment)
                         .textFieldStyle(.plain)
-                        .onSubmit { redraft() }
-                    if redrafting {
+                        .onSubmit { if showChat { ask() } else { redraft() } }
+                    if redrafting || asking {
                         ProgressView().controlSize(.mini)
                     } else {
+                        Button { showChat.toggle() } label: {
+                            Image(systemName: showChat ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(showChat ? "Hide chat" : "Chat about this draft")
                         Button { redraft() } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.borderless)
-                            .help("Redraft")
+                            .help(showChat ? "Redraft using the chat" : "Redraft")
                         if toolAccess != .off {
                             Button { redraft(tools: toolAccess) } label: { Image(systemName: "wrench.and.screwdriver") }
                                 .buttonStyle(.borderless)
@@ -206,7 +224,7 @@ struct ItemView: View {
                 .padding(.horizontal, 8)
                 .frame(height: 24)
                 .raised(palette)
-                .disabled(redrafting || sending)
+                .disabled(redrafting || asking || sending)
                 Button(sending ? "Sending…" : "Send") {
                     if let placeholder = draft.firstPlaceholder { unfilled = placeholder } else { send() }
                 }
@@ -234,6 +252,23 @@ struct ItemView: View {
                 self.error = error.localizedDescription
             }
             redrafting = false
+        }
+    }
+
+    private func ask() {
+        let question = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty else { return }
+        asking = true
+        error = nil
+        comment = ""
+        Task {
+            do {
+                try await inbox.ask(item, question)
+            } catch {
+                self.error = error.localizedDescription
+                comment = question
+            }
+            asking = false
         }
     }
 

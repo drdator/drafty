@@ -69,7 +69,13 @@ struct Item: Codable, Identifiable {
     var why: String?  // as on Candidate; filled in on the next check if missing
     var canAutoReply: Bool?
     var draft: String
+    var chat: [ThreadMessage]?  // the user's side chat with Claude about this item
     var id: String { message.id }
+
+    /// The thread, or just the latest message for items saved before threads were kept.
+    var messages: [ThreadMessage] {
+        thread ?? [ThreadMessage(author: message.from, date: message.date, text: message.preview, fromMe: false)]
+    }
 }
 
 /// How much Drafty may answer on its own. Each level includes the ones below it.
@@ -301,11 +307,30 @@ final class Inbox {
         items.removeAll { $0.id == item.id }
     }
 
-    /// Rewrites a draft with the current About you, taking the user's edits and comment into account.
+    /// Rewrites a draft with the current About you, taking the user's edits, chat and comment into account.
     func redraft(_ item: Item, current: String, comment: String, tools: ToolAccess = .off) async throws -> String {
         try await Claude(aboutMe: settings.aboutMe)
-            .redraft(item.message, thread: item.thread ?? [ThreadMessage(author: item.message.from, date: item.message.date, text: item.message.preview, fromMe: false)],
-                     current: current, comment: comment, tools: tools)
+            .redraft(item.message, thread: item.messages, current: current, comment: comment,
+                     chat: items.first { $0.id == item.id }?.chat ?? [], tools: tools)
+    }
+
+    /// Asks Claude about an item in its side chat, or gives it context for the next draft.
+    func ask(_ item: Item, _ question: String) async throws {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        cancelAutoReply(item.id)  // the user is working on it
+        items[index].chat = (items[index].chat ?? []) + [ThreadMessage(author: "You", date: .now, text: question, fromMe: true)]
+        let current = items[index]
+        do {
+            let answer = try await Claude(aboutMe: settings.aboutMe)
+                .chat(about: current.message, thread: current.messages, draft: current.draft, chat: current.chat ?? [])
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                items[index].chat?.append(ThreadMessage(author: "Claude", date: .now, text: answer, fromMe: false))
+            }
+        } catch {
+            // Take the question back out, so the user can send it again.
+            if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].chat?.removeLast() }
+            throw error
+        }
     }
 
     /// Has Claude rewrite About you from the user's own recent Slack messages and sent email.

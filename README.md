@@ -1,6 +1,6 @@
 # Drafty
 
-A menu bar app that checks Slack and Gmail every 3 minutes for messages waiting on you. When one needs an answer, it notifies you and has Claude Opus 5.5 draft a reply. You edit the draft and send it from the popover, ask Claude to redraft it (optionally with a comment like "decline politely"), or dismiss it.
+A menu bar app that checks Slack and Gmail every 3 minutes for messages waiting on you. When one needs an answer, it notifies you and has Claude Opus 5.5 draft a reply. You edit the draft and send it from the popover, ask Claude to redraft it (optionally with a comment like "decline politely"), or dismiss it. The chat button next to ↻ opens a side chat with Claude about the message, to ask about it or add context; ↻ then redrafts using what you told it.
 
 ## Build
 
